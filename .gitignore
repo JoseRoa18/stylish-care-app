@@ -1,0 +1,11 @@
+node_modules/
+client/node_modules/
+client/dist/
+.env
+*.log
+.DS_Store
+
+# Claude Code local files
+.claude/
+# Vercel
+.vercel

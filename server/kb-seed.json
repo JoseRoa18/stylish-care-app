@@ -1,0 +1,79 @@
+[
+  {
+    "id": "KB-01",
+    "title": "Returns — Direct (stylishkb.com / sinksdirect.ca)",
+    "finish": null,
+    "tags": ["returns"],
+    "body": "Customers may return unused, uninstalled items in original packaging within 30 days of delivery. A return authorization (RA) number is required before shipping anything back. Restocking and return shipping may apply unless the item arrived damaged or defective. Refunds are issued to the original payment method within 5-7 business days after the returned item is received and inspected."
+  },
+  {
+    "id": "KB-02",
+    "title": "Returns — RONA orders",
+    "finish": null,
+    "tags": ["returns", "marketplace"],
+    "body": "RONA orders follow RONA's return policy. Returns are processed through the RONA order reference. Request the order number and reason, confirm the item is unused and in original packaging, and provide the RONA return instructions. Do not issue a direct refund for marketplace orders — the refund is handled by the marketplace."
+  },
+  {
+    "id": "KB-03",
+    "title": "Returns — Wayfair orders",
+    "finish": null,
+    "tags": ["returns", "marketplace"],
+    "body": "Wayfair manages its own returns and refunds. For a Wayfair return, direct the customer through their Wayfair account or confirm the return label was issued. Replacement parts for Wayfair customers can still be sent directly when the issue is a missing or defective component."
+  },
+  {
+    "id": "KB-04",
+    "title": "Shipping & delivery times",
+    "finish": null,
+    "tags": ["shipping"],
+    "body": "In-stock items ship within 1-2 business days. Standard ground delivery takes 3-7 business days within Canada and the continental US. Tracking is emailed automatically once the label is created. If a customer has not received tracking after 3 business days, confirm the shipping address and escalate to fulfillment."
+  },
+  {
+    "id": "KB-05",
+    "title": "Damaged or defective on arrival",
+    "finish": null,
+    "tags": ["warranty", "shipping"],
+    "body": "If an item arrives damaged, request clear photos of the damage and the packaging. For a confirmed shipping damage or manufacturing defect, ship a free replacement or replacement part at no cost to the customer — no return of the damaged item is required unless requested. Log the case for quality tracking."
+  },
+  {
+    "id": "KB-06",
+    "title": "Limited warranty — sinks & faucets",
+    "finish": null,
+    "tags": ["warranty"],
+    "body": "STYLISH and Sinks Direct products carry a limited lifetime warranty against manufacturing defects for the original purchaser, covering materials and workmanship under normal residential use. The warranty does not cover damage from misuse, improper installation, abrasive cleaners, or normal wear. Proof of purchase is required for warranty claims."
+  },
+  {
+    "id": "KB-07",
+    "title": "Replacement parts requests",
+    "finish": null,
+    "tags": ["parts"],
+    "body": "Common replacement parts include pop-up drains, drain gaskets, mounting clips, basket strainers, and aerators. Identify the model number from the customer's order or product sheet, confirm the specific part needed, and ship the replacement directly. Most small parts ship free for in-warranty products."
+  },
+  {
+    "id": "KB-08",
+    "title": "Pop-up drain & gasket fitment",
+    "finish": null,
+    "tags": ["parts"],
+    "body": "Pop-up drains and drain gaskets are matched to the sink model. If a customer reports a leaking or missing gasket, confirm the model number and ship the correct gasket. Provide the basic installation note: hand-tighten the locknut, ensure the rubber gasket is seated flat, and do not overtighten."
+  },
+  {
+    "id": "KB-09",
+    "title": "Finish & color questions",
+    "finish": "Matte Black",
+    "tags": ["product", "finish"],
+    "body": "Finishes available across the range include Stainless Steel, Graphite Black, Brushed Nickel, Polished Chrome, Gold, Gun Metal, Matte Black, Pearl White and Granite Composite. Slight variation between batches or against on-screen photos is normal. If a customer believes they received the wrong finish, request photos and the order number to verify against the model ordered."
+  },
+  {
+    "id": "KB-10",
+    "title": "Product reviews & feedback",
+    "finish": null,
+    "tags": ["reviews"],
+    "body": "Thank the customer for their feedback. For a positive review, express appreciation and invite them to share it on the marketplace listing. For a negative review tied to a product issue, apologize, offer a concrete resolution (replacement part, replacement unit, or warranty claim), and follow up to confirm the issue is resolved."
+  },
+  {
+    "id": "KB-11",
+    "title": "General inquiries & contact",
+    "finish": null,
+    "tags": ["general"],
+    "body": "For order status, provide the latest tracking. For product availability, confirm against current stock. For anything outside policy or requiring a manager decision (goodwill credits, large-volume orders, escalations), acknowledge the request warmly and route to a specialist. Care hours and contact details are on stylishkb.com and sinksdirect.ca."
+  }
+]

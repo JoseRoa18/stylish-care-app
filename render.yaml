@@ -1,0 +1,18 @@
+# Render Blueprint — deploys the Stylish Care App as a single web service
+# (Express serves the built React client + the API on one port).
+#
+# Secrets/config are provided via a Secret File named ".env" added in the Render
+# dashboard (Environment → Secret Files). dotenv loads it at startup, exactly
+# like local development — so you don't have to re-enter ~20 variables one by one.
+services:
+  - type: web
+    name: stylish-care-app
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

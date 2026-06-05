@@ -1,0 +1,10 @@
+node_modules
+client/node_modules
+client/dist
+.env
+*.log
+.DS_Store
+# KB now lives in Supabase — these local files aren't needed in the deploy
+server/kb-data.json
+server/kb-embeddings.json
+server/data
