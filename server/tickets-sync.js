@@ -132,7 +132,16 @@ export async function touchStatus(ticketId, status) {
 }
 
 // ── read the table back for the inbox (server-side filter + search + paging) ──
-export async function queryTickets({ view = "active", q = "", page = 1, pageSize = 50 } = {}) {
+// sort: updated (last activity), newest (created), oldest (created), waiting
+// (longest since the customer last wrote — oldest first).
+const SORTS = {
+  updated: { col: "modified_time", asc: false },
+  newest: { col: "created_time", asc: false },
+  oldest: { col: "created_time", asc: true },
+  waiting: { col: "customer_response_time", asc: true },
+};
+
+export async function queryTickets({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) {
   const offset = (Math.max(1, page) - 1) * pageSize;
   let query = supabase.from("tickets").select("*", { count: "exact" });
 
@@ -152,7 +161,8 @@ export async function queryTickets({ view = "active", q = "", page = 1, pageSize
     );
   }
 
-  query = query.order("modified_time", { ascending: false, nullsFirst: false })
+  const o = SORTS[sort] || SORTS.updated;
+  query = query.order(o.col, { ascending: o.asc, nullsFirst: false })
     .range(offset, offset + pageSize - 1);
 
   const { data, error, count } = await query;

@@ -13,8 +13,8 @@ async function req(path, options) {
 export const api = {
   health: () => req("/health"),
   dashboard: () => req("/dashboard"),
-  inbox: ({ view = "active", q = "", page = 1, pageSize = 50 } = {}) =>
-    req(`/inbox?view=${encodeURIComponent(view)}&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`),
+  inbox: ({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) =>
+    req(`/inbox?view=${encodeURIComponent(view)}&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}&sort=${sort}`),
   tickets: () => req("/tickets"),
   conversation: (id) => req(`/tickets/${id}/conversation`),
   draft: (id, ticket) =>

@@ -10,6 +10,13 @@ const FIXED_VIEWS = [
   { key: "all", label: "All" },
 ];
 
+const SORT_OPTIONS = [
+  { key: "updated", label: "Last activity" },
+  { key: "newest", label: "Newest first" },
+  { key: "oldest", label: "Oldest first" },
+  { key: "waiting", label: "Longest waiting" },
+];
+
 export default function Inbox() {
   const [tickets, setTickets] = useState([]);
   const [counts, setCounts] = useState({ all: 0, active: 0, closed: 0, byStatus: {} });
@@ -21,6 +28,7 @@ export default function Inbox() {
   const [openId, setOpenId] = useState(null);
 
   const [view, setView] = useState("active");
+  const [sort, setSort] = useState("updated");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
@@ -32,13 +40,13 @@ export default function Inbox() {
     return () => clearTimeout(id);
   }, [search]);
 
-  // reset to page 1 whenever the filter or search changes
-  useEffect(() => { setPage(1); }, [view, debounced]);
+  // reset to page 1 whenever the filter, sort or search changes
+  useEffect(() => { setPage(1); }, [view, sort, debounced]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.inbox({ view, q: debounced, page, pageSize });
+      const data = await api.inbox({ view, q: debounced, page, pageSize, sort });
       setConfigured(data.configured);
       setTickets(data.tickets || []);
       setCounts(data.counts || { byStatus: {} });
@@ -50,7 +58,7 @@ export default function Inbox() {
     } finally {
       setLoading(false);
     }
-  }, [view, debounced, page]);
+  }, [view, debounced, page, sort]);
 
   // load on filter/search/page change + auto-refresh every 30s
   useEffect(() => {
@@ -92,8 +100,9 @@ export default function Inbox() {
       </div>
 
       {/* ── filter bar ─────────────────────────────────────── */}
-      <div className="card" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <div className="card" style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        {/* status chips (Active / All / one per real Zoho status) */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {FIXED_VIEWS.map((v) => (
             <button
               key={v.key}
@@ -103,7 +112,9 @@ export default function Inbox() {
               {v.label} <span style={{ opacity: 0.6 }}>{countFor(v.key)}</span>
             </button>
           ))}
-          <span style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 2px" }} />
+          {statusViews.length > 0 && (
+            <span style={{ width: 1, height: 20, background: "var(--line)", margin: "0 4px" }} />
+          )}
           {statusViews.map((v) => (
             <button
               key={v.key}
@@ -114,13 +125,35 @@ export default function Inbox() {
             </button>
           ))}
         </div>
-        <input
-          className="field"
-          style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9" }}
-          placeholder="Search # / subject / customer…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        {/* search + sort */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <input
+            className="field"
+            style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9" }}
+            placeholder="Search # / subject / customer / email…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-faint)" }}>
+            Sort:
+            <select
+              className="status-select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              title="Order tickets"
+            >
+              {SORT_OPTIONS.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 2px 10px" }}>
+        {total} ticket{total === 1 ? "" : "s"}
+        {view !== "all" && view !== "active" ? ` · ${view}` : view === "active" ? " · active" : ""}
+        {debounced ? ` · matching “${debounced}”` : ""}
       </div>
 
       {err && <div className="banner error">{err}</div>}
@@ -160,6 +193,27 @@ function fmtTime(t) {
   } catch {
     return "";
   }
+}
+
+function fmtDate(t) {
+  if (!t) return "";
+  try {
+    return new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+// compact "time ago" (e.g. 3h, 2d, 5mo) for the last-activity hint
+function ago(t) {
+  if (!t) return "";
+  const s = Math.max(0, (Date.now() - new Date(t).getTime()) / 1000);
+  const m = s / 60, h = m / 60, d = h / 24;
+  if (d >= 30) return `${Math.floor(d / 30)}mo ago`;
+  if (d >= 1) return `${Math.floor(d)}d ago`;
+  if (h >= 1) return `${Math.floor(h)}h ago`;
+  if (m >= 1) return `${Math.floor(m)}m ago`;
+  return "just now";
 }
 
 function fmtDuration(ms) {
@@ -440,7 +494,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
             <span className="mono">#{ticket.number}</span>
             <span>{ticket.customerName}</span>
             {ticket.customerEmail && <span>{ticket.customerEmail}</span>}
-            <span>{ticket.channel}</span>
+            {ticket.channel && <span>{ticket.channel}</span>}
+            {ticket.createdTime && (
+              <span title={`Created ${fmtTime(ticket.createdTime)}`}>📅 {fmtDate(ticket.createdTime)}</span>
+            )}
+            {ticket.modifiedTime && (
+              <span title={`Last activity ${fmtTime(ticket.modifiedTime)}`}>· updated {ago(ticket.modifiedTime)}</span>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>

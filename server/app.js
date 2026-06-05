@@ -37,10 +37,11 @@ export function createApp() {
       await maybeSync(); // keep the table fresh during normal use (throttled)
       const view = req.query.view || "active";
       const q = req.query.q || "";
+      const sort = req.query.sort || "updated";
       const page = Math.max(1, Number(req.query.page) || 1);
       const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize) || 50));
       const [{ tickets, total }, counts] = await Promise.all([
-        queryTickets({ view, q, page, pageSize }),
+        queryTickets({ view, q, page, pageSize, sort }),
         ticketCounts(),
       ]);
       res.json({
