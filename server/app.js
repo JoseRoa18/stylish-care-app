@@ -19,11 +19,51 @@ import { sourceCounts } from "./kb.js";
 import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
+import {
+  authEnabled,
+  checkPassword,
+  isAuthed,
+  requireAuth,
+  setSessionCookie,
+  clearSessionCookie,
+} from "./auth.js";
 
 export function createApp() {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  // ── auth (shared team password) ──────────────────────────────
+  // Public endpoints first, then everything under /api requires a session.
+  app.post("/api/login", (req, res) => {
+    if (!authEnabled()) return res.json({ ok: true }); // gate disabled
+    if (checkPassword(req.body?.password)) {
+      setSessionCookie(req, res);
+      return res.json({ ok: true });
+    }
+    res.status(401).json({ error: "Incorrect password" });
+  });
+
+  app.post("/api/logout", (req, res) => {
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/me", (req, res) =>
+    res.json({ authed: isAuthed(req), authEnabled: authEnabled() })
+  );
+
+  app.get("/api/health", (_req, res) =>
+    res.json({
+      ok: true,
+      zoho: zohoConfigured(),
+      dropbox: dropboxConfigured(),
+      gemini: geminiConfigured(),
+    })
+  );
+
+  // Everything below this line needs a valid session.
+  app.use("/api", requireAuth);
 
   app.use("/api/tickets", ticketsRouter);
   app.use("/api/kb", kbRouter);
@@ -117,15 +157,6 @@ export function createApp() {
       res.status(502).json({ error: err.message });
     }
   });
-
-  app.get("/api/health", (_req, res) =>
-    res.json({
-      ok: true,
-      zoho: zohoConfigured(),
-      dropbox: dropboxConfigured(),
-      gemini: geminiConfigured(),
-    })
-  );
 
   return app;
 }

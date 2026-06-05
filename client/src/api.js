@@ -1,17 +1,31 @@
 // client/src/api.js
 
+// Called when any protected request comes back 401 (session missing/expired),
+// so the app can drop back to the login screen instead of throwing everywhere.
+let _onAuthExpired = null;
+export function onAuthExpired(fn) {
+  _onAuthExpired = fn;
+}
+
 async function req(path, options) {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    if (res.status === 401 && data.authRequired && _onAuthExpired) _onAuthExpired();
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
   return data;
 }
 
 export const api = {
   health: () => req("/health"),
+  me: () => req("/me"),
+  login: (password) =>
+    req("/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => req("/logout", { method: "POST" }),
   dashboard: () => req("/dashboard"),
   inbox: ({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) =>
     req(`/inbox?view=${encodeURIComponent(view)}&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}&sort=${sort}`),
