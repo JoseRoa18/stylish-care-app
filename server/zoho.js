@@ -95,6 +95,27 @@ async function zohoFetch(path, options = {}) {
 
 // ── public operations ────────────────────────────────────────
 
+// Zoho omits modifiedTime/closedTime from the list by default — request them
+// explicitly so we can compute wait & resolution times.
+const TICKET_FIELDS =
+  "ticketNumber,subject,status,channel,email,contactName,createdTime,modifiedTime,closedTime,customerResponseTime,webUrl";
+
+// One page of tickets for a status (used by the Supabase sync to paginate the
+// full history). Returns normalized tickets; empty array when past the end.
+export async function fetchTicketsPage({ status, from = 0, limit = 100 }) {
+  const p = new URLSearchParams({
+    departmentId: ZOHO_DEPARTMENT_ID,
+    sortBy: "-modifiedTime",
+    from: String(from),
+    limit: String(limit),
+    include: "contacts",
+    fields: TICKET_FIELDS,
+  });
+  if (status) p.set("status", status);
+  const data = await zohoFetch(`/tickets?${p.toString()}`);
+  return (data?.data || []).map(normalizeTicket);
+}
+
 // List tickets, newest first. Pass `statuses` (array) to override the default
 // set — e.g. include "Closed"/"Escalated" so the UI can show & filter them.
 export async function listTickets({ limit = 25, statuses } = {}) {
@@ -104,10 +125,7 @@ export async function listTickets({ limit = 25, statuses } = {}) {
     sortBy: "-modifiedTime",
     limit: String(limit),
     include: "contacts",
-    // Zoho omits modifiedTime/closedTime from the list by default — request
-    // them explicitly so we can compute wait & resolution times.
-    fields:
-      "ticketNumber,subject,status,channel,email,contactName,createdTime,modifiedTime,closedTime,customerResponseTime,webUrl",
+    fields: TICKET_FIELDS,
   });
   // Zoho accepts a single status param; query each and merge.
   const all = [];
