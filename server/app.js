@@ -33,30 +33,35 @@ export function createApp() {
   // search and pagination), not a capped live Zoho fetch. Per-ticket actions
   // (conversation, draft, send, status) still go live to Zoho by id.
   app.get("/api/inbox", async (req, res) => {
+    const view = req.query.view || "active";
+    const q = req.query.q || "";
+    const sort = req.query.sort || "updated";
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize) || 50));
+
+    // Refresh from Zoho but NEVER let a sync hiccup break the list — the inbox
+    // is served entirely from Supabase. A failed sync is a soft warning.
+    let syncError = null;
+    try { await maybeSync(); } catch (e) { syncError = e.message; }
+
+    // Tickets and counts are fetched independently so one failing never blanks
+    // the other (e.g. the status chips must not vanish on a transient error).
+    let tickets = [], total = 0;
+    let counts = { all: 0, active: 0, closed: 0, byStatus: {} };
+    let error = null;
     try {
-      await maybeSync(); // keep the table fresh during normal use (throttled)
-      const view = req.query.view || "active";
-      const q = req.query.q || "";
-      const sort = req.query.sort || "updated";
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize) || 50));
-      const [{ tickets, total }, counts] = await Promise.all([
-        queryTickets({ view, q, page, pageSize, sort }),
-        ticketCounts(),
-      ]);
-      res.json({
-        configured: zohoConfigured(),
-        tickets,
-        total,
-        page,
-        pageSize,
-        counts,
-        fetchedAt: new Date().toISOString(),
-        error: null,
-      });
-    } catch (err) {
-      res.status(502).json({ configured: zohoConfigured(), tickets: [], error: err.message });
-    }
+      const r = await queryTickets({ view, q, page, pageSize, sort });
+      tickets = r.tickets; total = r.total;
+    } catch (e) { error = e.message; }
+    try { counts = await ticketCounts(); } catch (e) { error = error || e.message; }
+
+    res.json({
+      configured: zohoConfigured(),
+      tickets, total, page, pageSize, counts,
+      fetchedAt: new Date().toISOString(),
+      error,
+      syncWarning: syncError, // surfaced softly; data still shows
+    });
   });
 
   app.get("/api/dashboard", async (_req, res) => {

@@ -24,6 +24,7 @@ export default function Inbox() {
   const [configured, setConfigured] = useState(true);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [err, setErr] = useState(null);
+  const [syncWarning, setSyncWarning] = useState(null);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState(null);
 
@@ -53,6 +54,7 @@ export default function Inbox() {
       setTotal(data.total || 0);
       setFetchedAt(data.fetchedAt);
       setErr(data.error || null);
+      setSyncWarning(data.syncWarning || null);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -92,6 +94,11 @@ export default function Inbox() {
       <div className="section-title">
         <h2>Tickets</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {syncWarning && (
+            <span style={{ fontSize: 12, color: "#c8912a" }} title={syncWarning}>
+              ⚠ Live sync delayed (showing last saved)
+            </span>
+          )}
           <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
             {loading ? "Syncing…" : `Auto-syncs every 30s · last ${fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : "—"}`}
           </span>

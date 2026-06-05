@@ -62,7 +62,7 @@ async function getAccessToken() {
   return _token.value;
 }
 
-async function zohoFetch(path, options = {}) {
+async function zohoFetch(path, options = {}, _retried = false) {
   const token = await getAccessToken();
   const res = await fetch(`${ZOHO_API_BASE}${path}`, {
     ...options,
@@ -86,6 +86,16 @@ async function zohoFetch(path, options = {}) {
   }
 
   if (!res.ok) {
+    // On serverless, a warm instance can hold an access token that Zoho already
+    // invalidated (another instance refreshed). Force a fresh token and retry once.
+    const invalidToken =
+      res.status === 401 ||
+      body?.errorCode === "INVALID_OAUTH" ||
+      /oauth token/i.test(body?.message || "");
+    if (invalidToken && !_retried) {
+      _token = null; // bust the cache so getAccessToken re-mints
+      return zohoFetch(path, options, true);
+    }
     const msg =
       (body && (body.message || body.errorCode)) || `HTTP ${res.status}`;
     throw new Error(`Zoho Desk error: ${msg}`);
