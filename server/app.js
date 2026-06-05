@@ -13,48 +13,12 @@ import cors from "cors";
 import ticketsRouter from "./routes/tickets.js";
 import kbRouter from "./routes/kb.js";
 import translateRouter from "./routes/translate.js";
-import { listTickets, zohoConfigured } from "./zoho.js";
+import { zohoConfigured } from "./zoho.js";
 import { listManuals, dropboxConfigured } from "./dropbox.js";
 import { sourceCounts } from "./kb.js";
 import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
-import { syncRecent } from "./tickets-sync.js";
-
-const INBOX_STATUSES = (process.env.ZOHO_INBOX_STATUSES ||
-  "Open,On Hold,Escalated,Closed")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-// ── short-lived ticket cache (replaces the old setInterval poll) ──
-const TTL = Number(process.env.TICKET_CACHE_TTL_MS || 25000);
-let _cache = { data: [], at: 0, error: null };
-
-async function getTickets() {
-  if (_cache.at && Date.now() - _cache.at < TTL) return _cache;
-  if (!zohoConfigured()) return { data: [], at: Date.now(), error: null };
-  try {
-    const data = await listTickets({ limit: 60, statuses: INBOX_STATUSES });
-    _cache = { data, at: Date.now(), error: null };
-  } catch (err) {
-    _cache = { data: _cache.data, at: Date.now(), error: err.message };
-  }
-  return _cache;
-}
-
-// Keep the synced tickets table fresh on use. Awaited (not fire-and-forget)
-// because serverless kills background work after the response — but throttled
-// so it only actually syncs once every couple of minutes.
-let _lastSync = 0;
-async function maybeSync() {
-  if (Date.now() - _lastSync < 120000) return;
-  _lastSync = Date.now();
-  try {
-    await syncRecent();
-  } catch {
-    /* ignore — dashboard still renders from the last sync */
-  }
-}
+import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 
 export function createApp() {
   const app = express();
@@ -65,14 +29,33 @@ export function createApp() {
   app.use("/api/kb", kbRouter);
   app.use("/api/translate", translateRouter);
 
-  app.get("/api/inbox", async (_req, res) => {
-    const c = await getTickets();
-    res.json({
-      configured: zohoConfigured(),
-      tickets: c.data,
-      fetchedAt: c.at ? new Date(c.at).toISOString() : null,
-      error: c.error,
-    });
+  // Inbox now reads the FULL synced history from Supabase (server-side filter,
+  // search and pagination), not a capped live Zoho fetch. Per-ticket actions
+  // (conversation, draft, send, status) still go live to Zoho by id.
+  app.get("/api/inbox", async (req, res) => {
+    try {
+      await maybeSync(); // keep the table fresh during normal use (throttled)
+      const view = req.query.view || "active";
+      const q = req.query.q || "";
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize) || 50));
+      const [{ tickets, total }, counts] = await Promise.all([
+        queryTickets({ view, q, page, pageSize }),
+        ticketCounts(),
+      ]);
+      res.json({
+        configured: zohoConfigured(),
+        tickets,
+        total,
+        page,
+        pageSize,
+        counts,
+        fetchedAt: new Date().toISOString(),
+        error: null,
+      });
+    } catch (err) {
+      res.status(502).json({ configured: zohoConfigured(), tickets: [], error: err.message });
+    }
   });
 
   app.get("/api/dashboard", async (_req, res) => {

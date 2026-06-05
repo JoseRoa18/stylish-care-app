@@ -8,9 +8,8 @@ const t0 = Date.now();
 const secs = () => Math.round((Date.now() - t0) / 1000);
 
 const total = await syncAll({
-  onPage: (status, from, n, running) => {
-    if (from % 1000 === 0 || n < 100)
-      console.log(`  [${status}] from ${from}: +${n} (running ${running}, ${secs()}s)`);
+  onPage: (from, n, running) => {
+    console.log(`  from ${from}: +${n} (running ${running}, ${secs()}s)`);
   },
 });
 

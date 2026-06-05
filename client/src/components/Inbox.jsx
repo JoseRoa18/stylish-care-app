@@ -1,31 +1,58 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 
-const STATUS_OPTIONS = ["Open", "On Hold", "Escalated", "Closed"];
-const FILTERS = ["Active", "All", "Open", "On Hold", "Escalated", "Closed"];
+// "view" values map to server-side filters. "all"/"active"/"closed" are
+// computed; everything else is matched as an exact Zoho status. Built dynamically
+// from the live status counts so custom statuses (Awaiting Response, Closed
+// Wayfair, …) show up automatically.
+const FIXED_VIEWS = [
+  { key: "active", label: "Active" },
+  { key: "all", label: "All" },
+];
 
 export default function Inbox() {
   const [tickets, setTickets] = useState([]);
+  const [counts, setCounts] = useState({ all: 0, active: 0, closed: 0, byStatus: {} });
+  const [total, setTotal] = useState(0);
   const [configured, setConfigured] = useState(true);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState(null);
-  const [filter, setFilter] = useState("Active");
+
+  const [view, setView] = useState("active");
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
+  // debounce the search box so we don't query on every keystroke
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(search.trim()), 350);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  // reset to page 1 whenever the filter or search changes
+  useEffect(() => { setPage(1); }, [view, debounced]);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await api.inbox();
+      const data = await api.inbox({ view, q: debounced, page, pageSize });
       setConfigured(data.configured);
       setTickets(data.tickets || []);
+      setCounts(data.counts || { byStatus: {} });
+      setTotal(data.total || 0);
       setFetchedAt(data.fetchedAt);
       setErr(data.error || null);
     } catch (e) {
       setErr(e.message);
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [view, debounced, page]);
 
-  // initial + auto-refresh every 30s
+  // load on filter/search/page change + auto-refresh every 30s
   useEffect(() => {
     load();
     const id = setInterval(load, 30000);
@@ -40,26 +67,17 @@ export default function Inbox() {
       </div>
     );
 
-  const isClosed = (s) => /closed/i.test(s || "");
-  const counts = tickets.reduce((acc, t) => {
-    acc[t.status] = (acc[t.status] || 0) + 1;
-    return acc;
-  }, {});
-  const countFor = (f) =>
-    f === "All" ? tickets.length
-    : f === "Active" ? tickets.filter((t) => !isClosed(t.status)).length
-    : counts[f] || 0;
+  // status chips, biggest first, after the two fixed views
+  const statusViews = Object.entries(counts.byStatus || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([status, n]) => ({ key: status, label: status, n }));
+  const statusOptions = Object.keys(counts.byStatus || {});
+  const countFor = (key) =>
+    key === "all" ? counts.all : key === "active" ? counts.active : counts.byStatus?.[key] || 0;
 
-  const filtered = tickets.filter((t) => {
-    if (filter === "Active" && isClosed(t.status)) return false;
-    if (filter !== "Active" && filter !== "All" && t.status !== filter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const hay = `${t.number} ${t.subject} ${t.customerName} ${t.customerEmail}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
 
   return (
     <>
@@ -67,7 +85,7 @@ export default function Inbox() {
         <h2>Tickets</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-            Auto-syncs every 30s · last {fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : "—"}
+            {loading ? "Syncing…" : `Auto-syncs every 30s · last ${fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : "—"}`}
           </span>
           <button className="btn sm" onClick={load}>↻ Refresh</button>
         </div>
@@ -76,13 +94,23 @@ export default function Inbox() {
       {/* ── filter bar ─────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {FILTERS.map((f) => (
+          {FIXED_VIEWS.map((v) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`chip ${filter === f ? "active" : ""}`}
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={`chip ${view === v.key ? "active" : ""}`}
             >
-              {f} <span style={{ opacity: 0.6 }}>{countFor(f)}</span>
+              {v.label} <span style={{ opacity: 0.6 }}>{countFor(v.key)}</span>
+            </button>
+          ))}
+          <span style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 2px" }} />
+          {statusViews.map((v) => (
+            <button
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={`chip ${view === v.key ? "active" : ""}`}
+            >
+              {v.label} <span style={{ opacity: 0.6 }}>{v.n}</span>
             </button>
           ))}
         </div>
@@ -97,17 +125,29 @@ export default function Inbox() {
 
       {err && <div className="banner error">{err}</div>}
 
-      {filtered.length === 0 ? (
-        <div className="empty">No tickets match this view.</div>
+      {tickets.length === 0 ? (
+        <div className="empty">{loading ? "Loading…" : "No tickets match this view."}</div>
       ) : (
-        filtered.map((t) => (
+        tickets.map((t) => (
           <TicketRow
             key={t.id}
             ticket={t}
+            statusOptions={statusOptions}
             open={openId === t.id}
             onToggle={() => setOpenId(openId === t.id ? null : t.id)}
           />
         ))
+      )}
+
+      {/* ── pagination ─────────────────────────────────────── */}
+      {total > pageSize && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, margin: "18px 0 4px" }}>
+          <button className="btn sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Prev</button>
+          <span style={{ fontSize: 13, color: "var(--ink-faint)" }}>
+            {from}–{to} of {total} · page {page} / {pages}
+          </span>
+          <button className="btn sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>Next →</button>
+        </div>
       )}
     </>
   );
@@ -246,8 +286,9 @@ function LaneBanner({ triage }) {
   );
 }
 
-function StatusSelect({ status, onChange, saving }) {
-  const opts = STATUS_OPTIONS.includes(status) ? STATUS_OPTIONS : [status, ...STATUS_OPTIONS];
+function StatusSelect({ status, options = [], onChange, saving }) {
+  const base = options.length ? options : ["Open", "Awaiting Response", "Closed"];
+  const opts = base.includes(status) ? base : [status, ...base];
   return (
     <select
       className="status-select"
@@ -264,7 +305,7 @@ function StatusSelect({ status, onChange, saving }) {
   );
 }
 
-function TicketRow({ ticket, open, onToggle }) {
+function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
@@ -405,7 +446,7 @@ function TicketRow({ ticket, open, onToggle }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
           {sent && <span className="badge sent">✓ Sent</span>}
           <WaitTimer since={ticket.customerResponseTime} status={status} />
-          <StatusSelect status={status} onChange={changeStatus} saving={statusSaving} />
+          <StatusSelect status={status} options={statusOptions} onChange={changeStatus} saving={statusSaving} />
         </div>
       </div>
 

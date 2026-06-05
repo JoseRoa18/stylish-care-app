@@ -100,12 +100,14 @@ async function zohoFetch(path, options = {}) {
 const TICKET_FIELDS =
   "ticketNumber,subject,status,channel,email,contactName,createdTime,modifiedTime,closedTime,customerResponseTime,webUrl";
 
-// One page of tickets for a status (used by the Supabase sync to paginate the
-// full history). Returns normalized tickets; empty array when past the end.
-export async function fetchTicketsPage({ status, from = 0, limit = 100 }) {
+// One page of tickets (used by the Supabase sync to paginate the full history).
+// Pass no `status` to get EVERY status — the department uses custom ones
+// ("Awaiting Response", "Closed Wayfair", …) so filtering by status drops rows.
+// Returns normalized tickets; empty array when past the end.
+export async function fetchTicketsPage({ status, from = 0, limit = 100, sortBy = "-modifiedTime" } = {}) {
   const p = new URLSearchParams({
     departmentId: ZOHO_DEPARTMENT_ID,
-    sortBy: "-modifiedTime",
+    sortBy,
     from: String(from),
     limit: String(limit),
     include: "contacts",

@@ -3,6 +3,7 @@ import { Router } from "express";
 import { listTickets, getConversation, sendReply, updateTicketStatus, zohoConfigured } from "../zoho.js";
 import { generateDraft } from "../gemini.js";
 import { retrieveRelevant } from "../retrieval.js";
+import { touchStatus } from "../tickets-sync.js";
 
 const router = Router();
 
@@ -66,7 +67,10 @@ router.post("/:id/status", async (req, res) => {
     const { status } = req.body;
     if (!status?.trim()) return res.status(400).json({ error: "Missing status" });
     const result = await updateTicketStatus(req.params.id, status);
-    res.json({ ok: true, status: result?.status || status });
+    const next = result?.status || status;
+    // Mirror it into the synced table so the inbox list stays consistent.
+    try { await touchStatus(req.params.id, next); } catch { /* next sync fixes it */ }
+    res.json({ ok: true, status: next });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
