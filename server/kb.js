@@ -7,7 +7,7 @@
 import { supabase, toVector } from "./supabase.js";
 import { embedDocuments } from "./embeddings.js";
 
-export const SOURCES = ["manual", "web", "dropbox", "zoho-template", "youtube"];
+export const SOURCES = ["manual", "web", "dropbox", "zoho-template", "youtube", "resolved-ticket"];
 
 function rowToArticle(r) {
   return {

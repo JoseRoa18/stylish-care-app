@@ -68,6 +68,7 @@ export const KB_SOURCES = {
   dropbox: { label: "Dropbox", color: "#0061ff" },
   "zoho-template": { label: "Template", color: "#c8a24a" },
   youtube: { label: "Video", color: "#ff0033" },
+  "resolved-ticket": { label: "Resolved case", color: "#7a5cff" },
 };
 
 // Stylish product finishes → tag colors
