@@ -701,7 +701,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
           )}
 
           {conversation && conversation.length === 0 && !convoLoading && (
-            <div className="empty">This ticket has no readable messages.</div>
+            <div className="empty" style={{ textAlign: "left" }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>This ticket has no content — in Zoho either.</div>
+              <div style={{ fontSize: 13, color: "var(--ink-faint)" }}>
+                Zoho reports 0 messages, 0 comments and 0 attachments for it (usually a leftover from a
+                merge/split or a mail-fetch glitch).{" "}
+                {ticket.webUrl && (
+                  <a href={ticket.webUrl} target="_blank" rel="noreferrer">Open it in Zoho</a>
+                )}{" "}
+                to confirm — if it's empty there too, you can safely 🗑 delete or 🚫 spam it from here.
+              </div>
+            </div>
           )}
 
           {conversation && conversation.length > 0 && (

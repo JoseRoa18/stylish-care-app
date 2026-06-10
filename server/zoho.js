@@ -323,6 +323,28 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
       });
     }
   }
+  // No email threads (web-form/phone tickets, or tickets Zoho holds no content
+  // for): fall back to the ticket's own description as the opening message.
+  if (!out.length) {
+    try {
+      const tk = await zohoFetch(`/tickets/${ticketId}`);
+      if (tk?.description) {
+        out.push({
+          id: "description",
+          direction: "in",
+          from: tk.email || "",
+          author: tk.contact ? [tk.contact.firstName, tk.contact.lastName].filter(Boolean).join(" ") : "",
+          createdTime: tk.createdTime,
+          text: htmlToText(tk.description),
+          html: sanitizeEmailHtml(tk.description),
+          attachments: [],
+        });
+      }
+    } catch {
+      /* truly empty ticket — the client shows a helpful empty state */
+    }
+  }
+
   // chronological order
   out.sort((a, b) => (a.createdTime > b.createdTime ? 1 : -1));
   return out;
