@@ -24,14 +24,23 @@ function tokenize(text) {
 
 import { semanticSearch, keywordSearch } from "./kb-index.js";
 
+// Pull a wider candidate pool than k, then diversify so one source can't
+// monopolise the final set. With 500+ resolved-ticket entries, a query can
+// otherwise return k near-duplicate past cases and crowd out the one video
+// tutorial or reply template that would help.
+const POOL = Number(process.env.RETRIEVAL_POOL || 40);
+const RESERVE_SOURCES = ["youtube", "zoho-template"];
+const RESERVE_MARGIN = Number(process.env.RETRIEVAL_RESERVE_MARGIN || 0.1); // within this of the top score
+const RESERVE_FLOOR = Number(process.env.RETRIEVAL_RESERVE_FLOOR || 0.6); // and at least this similar absolutely
+
 // Preferred entry point: semantic (pgvector) search, falling back to a Postgres
 // keyword search if embeddings are unavailable. Both hit Supabase directly, so
 // no need to load the whole KB into memory.
 export async function retrieveRelevant({ ticket, conversation }, k = 8) {
   const query = buildQuery({ ticket, conversation });
   try {
-    const sem = await semanticSearch(query, null, k);
-    if (sem && sem.length) return sem;
+    const pool = await semanticSearch(query, null, Math.max(POOL, k));
+    if (pool && pool.length) return diversify(pool, k);
   } catch {
     // embedding unavailable/errored → keyword fallback below
   }
@@ -40,6 +49,30 @@ export async function retrieveRelevant({ ticket, conversation }, k = 8) {
   } catch {
     return [];
   }
+}
+
+// Guarantee the final set keeps a slot for the best video tutorial and the best
+// reply template WHEN they're clearly relevant (close to the top match), then
+// fill the rest by score. A reserved item that isn't relevant enough is simply
+// not forced in — so we never inject an off-topic video. Items already in the
+// natural top-k cost no extra slot (deduped by id).
+export function diversify(pool, k) {
+  if (pool.length <= k) return pool;
+  const top = pool[0]?._score ?? 0;
+  const floor = Math.max(RESERVE_FLOOR, top - RESERVE_MARGIN);
+  const chosen = new Map();
+  for (const src of RESERVE_SOURCES) {
+    if (chosen.size >= k) break;
+    const best = pool.find((a) => a.source === src && (a._score ?? 0) >= floor);
+    if (best) chosen.set(best.id, best);
+  }
+  for (const a of pool) {
+    if (chosen.size >= k) break;
+    chosen.set(a.id, a);
+  }
+  return [...chosen.values()]
+    .sort((x, y) => (y._score ?? 0) - (x._score ?? 0))
+    .slice(0, k);
 }
 
 // Build a search query from the ticket: subject + the customer's words.
