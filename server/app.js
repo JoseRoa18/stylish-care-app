@@ -144,6 +144,12 @@ export function createApp() {
       const byChannel = Object.fromEntries(
         (byChannelRows.data || []).map((r) => [r.channel, Number(r.count)])
       );
+      // What Zoho's "Open Tickets" view counts: open-TYPE statuses (Open +
+      // Escalated). Awaiting Response / Wayfair / Pending Return are
+      // on-hold-type there, so they don't belong in the headline number.
+      const openNow = Object.entries(byStatus)
+        .filter(([s]) => /^(open|escalated)$/i.test(s))
+        .reduce((n, [, c]) => n + c, 0);
       const perDay = (perDayRows.data || []).map((r) => ({
         label: new Date(r.day + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
         count: Number(r.count),
@@ -156,6 +162,7 @@ export function createApp() {
         kbArticles: kb.total,
         total: m.total || 0,
         active: m.active || 0,
+        openNow,
         closed: m.closed || 0,
         byStatus,
         byChannel,
