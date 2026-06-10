@@ -64,8 +64,9 @@ export function createApp() {
   );
 
   // Daily keep-alive (Vercel cron) — runs a tiny DB query so the free Supabase
-  // project never pauses after 7 idle days. Public so the cron can reach it;
-  // if CRON_SECRET is set, Vercel's Bearer header is required.
+  // project never pauses after 7 idle days, and piggybacks a sync+reconcile so
+  // the tickets table stays fresh even on days nobody opens the app. Public so
+  // the cron can reach it; if CRON_SECRET is set, Vercel's Bearer is required.
   app.get("/api/cron/keepalive", async (req, res) => {
     const secret = process.env.CRON_SECRET;
     if (secret && req.headers.authorization !== `Bearer ${secret}`) {
@@ -76,6 +77,7 @@ export function createApp() {
         .from("tickets")
         .select("*", { count: "exact", head: true });
       if (error) throw new Error(error.message);
+      try { await maybeSync(0); } catch { /* keepalive still counts as alive */ }
       res.json({ ok: true, pinged: "tickets", count: count ?? null, at: new Date().toISOString() });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });

@@ -128,6 +128,22 @@ export async function fetchTicketsPage({ status, from = 0, limit = 100, sortBy =
   return (data?.data || []).map(normalizeTicket);
 }
 
+// Fetch ONE ticket by id. Returns null when the ticket is effectively gone for
+// our inbox: not found, marked spam, trashed, or moved to another department.
+// Used by the reconciler to resolve rows that vanished from Zoho's lists.
+export async function fetchTicketById(ticketId) {
+  let t;
+  try {
+    t = await zohoFetch(`/tickets/${ticketId}?include=contacts`);
+  } catch (err) {
+    if (/not.?found|invalid|does not exist/i.test(err.message)) return null;
+    throw err;
+  }
+  if (!t || t.isSpam || t.isDeleted) return null;
+  if (t.departmentId && String(t.departmentId) !== String(ZOHO_DEPARTMENT_ID)) return null;
+  return normalizeTicket(t);
+}
+
 // List tickets, newest first. Pass `statuses` (array) to override the default
 // set — e.g. include "Closed"/"Escalated" so the UI can show & filter them.
 export async function listTickets({ limit = 25, statuses } = {}) {

@@ -13,7 +13,7 @@
 //  • queryTickets / ticketCounts — read the table back for the inbox.
 
 import { supabase } from "./supabase.js";
-import { fetchTicketsPage } from "./zoho.js";
+import { fetchTicketsPage, fetchTicketById } from "./zoho.js";
 
 function toRow(t) {
   return {
@@ -107,9 +107,105 @@ export async function syncRecent({ pages = 1 } = {}) {
   return total;
 }
 
+// All rows we currently hold as active (paginated past the 1000-row cap).
+async function activeRows(fields = "id,status") {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("tickets")
+      .select(fields)
+      .not("status", "ilike", "%closed%")
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
+// Reconcile our ACTIVE rows against Zoho. Tickets that get spam-marked,
+// trashed, merged or moved INSIDE Zoho vanish from its list responses, so a
+// plain sync never updates them — they'd sit here as ghost "Open" rows forever.
+// Strategy: re-list every active status we hold (refreshing those rows), then
+// resolve the leftovers one-by-one: still exists → update; gone → delete row.
+export async function reconcileActive() {
+  const rows = await activeRows();
+  if (!rows.length) return { active: 0, removed: 0, fixed: 0 };
+
+  const seen = new Set();
+  for (const status of [...new Set(rows.map((r) => r.status))]) {
+    for (let from = 0; from < 2000; from += 100) {
+      const page = await fetchTicketsPage({ status, from, limit: 100 });
+      if (page.length) {
+        await upsertTickets(page);
+        for (const t of page) seen.add(t.id);
+      }
+      if (page.length < 100) break;
+    }
+  }
+
+  let removed = 0, fixed = 0;
+  for (const r of rows.filter((x) => !seen.has(x.id))) {
+    const t = await fetchTicketById(r.id);
+    if (t) {
+      await upsertTickets([t]); // e.g. it was closed — refresh the row
+      fixed++;
+    } else {
+      await removeTicketRow(r.id); // spam / trashed / merged / moved
+      removed++;
+    }
+  }
+  return { active: rows.length, removed, fixed };
+}
+
+// Full mirror pass (script/cron): refresh everything Zoho lists, then delete
+// any row Zoho no longer returns. Heavier than reconcileActive — also cleans
+// closed-history rows that were trashed/merged inside Zoho.
+export async function reconcileFull({ onPage } = {}) {
+  const seen = new Set();
+  let total = 0;
+  for (let page = 0; page < 5000; page++) {
+    const from = page * 100;
+    let tickets;
+    try {
+      tickets = await fetchTicketsPage({ from, limit: 100, sortBy: "-createdTime" });
+    } catch (e) {
+      console.error(`  reconcile page ${from} error: ${e.message}`);
+      break;
+    }
+    if (!tickets.length) break;
+    await upsertTickets(tickets);
+    for (const t of tickets) seen.add(t.id);
+    total += tickets.length;
+    if (onPage) onPage(from, tickets.length, total);
+    if (tickets.length < 100) break;
+    await sleep(250);
+  }
+  if (!seen.size) throw new Error("reconcileFull aborted: Zoho returned no tickets");
+
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("tickets").select("id,number,subject,status").range(from, from + 999);
+    if (error) throw new Error(error.message);
+    all.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const stale = all.filter((r) => !seen.has(r.id));
+  for (let i = 0; i < stale.length; i += 100) {
+    const ids = stale.slice(i, i + 100).map((r) => r.id);
+    const { error } = await supabase.from("tickets").delete().in("id", ids);
+    if (error) throw new Error(error.message);
+  }
+  return { synced: total, removed: stale.length, removedTickets: stale };
+}
+
 // Throttled refresh used on inbox/dashboard loads. Awaited (serverless kills
 // detached work after the response) but only actually hits Zoho every `minMs`.
+// Every ~15 min it also runs the deeper active-row reconcile, so tickets the
+// team spams/trashes/merges inside Zoho disappear here too.
 let _lastSync = 0;
+let _lastReconcile = 0;
 export async function maybeSync(minMs = 120000) {
   if (Date.now() - _lastSync < minMs) return;
   _lastSync = Date.now();
@@ -117,6 +213,14 @@ export async function maybeSync(minMs = 120000) {
     await syncRecent();
   } catch {
     /* ignore — the table still serves the last good snapshot */
+  }
+  if (Date.now() - _lastReconcile > 15 * 60000) {
+    _lastReconcile = Date.now();
+    try {
+      await reconcileActive();
+    } catch {
+      /* ignore — next pass will catch up */
+    }
   }
 }
 
