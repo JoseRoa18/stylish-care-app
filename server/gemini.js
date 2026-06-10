@@ -59,6 +59,7 @@ ACCURACY (never sacrifice this for tone):
 - Do NOT assert regulatory or compliance claims (e.g. "lead-free", NSF/ANSI, cUPC, certifications) unless those exact claims appear in the Knowledge Base. If a customer asks about them and the KB doesn't confirm, treat it as not covered and escalate.
 - If the articles don't cover the question, don't guess. Reassure the customer, let them know the team will follow up, and be specific about what will be clarified and what happens next. (See CONTINUITY below — don't introduce a new, unnamed "specialist" unless the thread already did.)
 - If a Knowledge Base article is a video tutorial (source: youtube) that directly helps, you MAY include its exact URL (e.g. "Here's a quick video that walks you through it: <url>"). Only ever share YouTube video URLs — never any other article's URL or internal links.
+- NEVER invent, guess, or reconstruct a URL. A video URL may ONLY be copied character-for-character from the "url:" field of a youtube article in the Knowledge Base below. If an article mentions that a video exists but no youtube article with a url is provided, do NOT include any link — describe the steps in words instead.
 - Do not mention the Knowledge Base, internal article IDs, or that you are an AI.
 - Reply in the SAME language the customer wrote in (e.g. English, Spanish or French). No subject line.
 
@@ -122,6 +123,47 @@ function conversationToText(conversation) {
       return `${who} (${t.author || t.from}):\n${t.text}`;
     })
     .join("\n\n");
+}
+
+// ── link safety net ──────────────────────────────────────────
+// The model is told to only copy video URLs verbatim from the KB, but a
+// hallucinated link (e.g. youtube.com/watch?v=example) reaching a customer is
+// bad enough that we also enforce it deterministically: any URL in the draft
+// that is not (a) a youtube URL from the retrieved KB articles or (b) a URL the
+// customer/agent already used in this conversation gets stripped out.
+const URL_RE = /https?:\/\/[^\s"'<>)\]]+/gi;
+
+function normalizeUrl(u) {
+  return String(u || "").trim().replace(/[.,;!?]+$/, "").toLowerCase();
+}
+
+export function sanitizeReplyLinks(replyHtml, kb = [], conversation = []) {
+  const allowed = new Set();
+  for (const a of kb) {
+    if (a.source === "youtube" && a.sourceUrl) allowed.add(normalizeUrl(a.sourceUrl));
+  }
+  for (const m of conversation) {
+    for (const u of String(m.text || "").match(URL_RE) || []) allowed.add(normalizeUrl(u));
+  }
+
+  let removed = 0;
+  let out = String(replyHtml || "");
+  // unwrap anchors whose href is not allowed (keep the label text, drop the link)
+  out = out.replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href, label) => {
+    if (allowed.has(normalizeUrl(href))) return m;
+    removed++;
+    // if the visible label is itself a URL, drop it entirely
+    return URL_RE.test(label) ? "" : label;
+  });
+  // then strip any bare URL that isn't allowed
+  out = out.replace(URL_RE, (u) => {
+    if (allowed.has(normalizeUrl(u))) return u;
+    removed++;
+    return "";
+  });
+  // tidy leftovers like "video: ." or empty parentheses from a removed link
+  if (removed) out = out.replace(/\(\s*\)/g, "").replace(/\s+([.,;:])/g, "$1").replace(/:\s*([.,;])/g, "$1");
+  return { reply: out, removedLinks: removed };
 }
 
 // Decide which review lane the ticket belongs in. Nothing auto-sends; this is
@@ -206,12 +248,21 @@ Write the reply and triage the ticket now.`;
     kbCovered: Boolean(parsed.kb_covered),
     sensitive: Boolean(parsed.sensitive),
   };
-  const route = routeReply(triage);
+  let route = routeReply(triage);
+
+  // Hard safety net: strip any URL the model didn't copy verbatim from the KB
+  // (or the conversation). If we had to remove one, the draft loses fast-lane
+  // status so a human double-checks the now-linkless sentence.
+  const { reply, removedLinks } = sanitizeReplyLinks(parsed.reply || "", kb, conversation);
+  if (removedLinks && route.lane === "ready") {
+    route = { lane: "review", label: "Needs review — removed an unverified link" };
+  }
 
   return {
-    draft: (parsed.reply || "").trim(),
+    draft: reply.trim(),
     ...triage,
     ...route, // lane, label
+    removedLinks,
     // kept for backward-compat with existing UI/consumers
     needsHuman: route.lane !== "ready",
   };
