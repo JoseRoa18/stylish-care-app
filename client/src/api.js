@@ -47,6 +47,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+  markSpam: (id) => req(`/tickets/${id}/spam`, { method: "POST" }),
+  trash: (id) => req(`/tickets/${id}/trash`, { method: "POST" }),
+  setSubject: (id, subject) =>
+    req(`/tickets/${id}/subject`, {
+      method: "POST",
+      body: JSON.stringify({ subject }),
+    }),
   kb: () => req("/kb"),
   kbSources: () => req("/kb/sources"),
   kbCreate: (article) =>

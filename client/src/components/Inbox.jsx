@@ -175,6 +175,7 @@ export default function Inbox() {
             statusOptions={statusOptions}
             open={openId === t.id}
             onToggle={() => setOpenId(openId === t.id ? null : t.id)}
+            onChanged={load}
           />
         ))
       )}
@@ -366,7 +367,7 @@ function StatusSelect({ status, options = [], onChange, saving }) {
   );
 }
 
-function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
+function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
@@ -391,6 +392,45 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
   // status
   const [status, setStatusState] = useState(ticket.status);
   const [statusSaving, setStatusSaving] = useState(false);
+
+  // editable subject (#8) — fix unhelpful subjects like "Fw: please see"
+  const [subj, setSubj] = useState(ticket.subject);
+  const [editingSubj, setEditingSubj] = useState(false);
+  const saveSubject = async (next) => {
+    setEditingSubj(false);
+    const v = (next || "").trim();
+    if (!v || v === subj) return;
+    const prev = subj;
+    setSubj(v);
+    try {
+      await api.setSubject(ticket.id, v);
+    } catch (e) {
+      setSubj(prev);
+      alert(`Could not rename: ${e.message}`);
+    }
+  };
+
+  // editable recipient (#2) — reply to a different/extra address when needed
+  const [toEmail, setToEmail] = useState(ticket.customerEmail || "");
+
+  // spam / trash
+  const [acting, setActing] = useState(false);
+  const actOn = async (kind) => {
+    const msg =
+      kind === "spam"
+        ? `Mark #${ticket.number} as spam?\n\nIt will be hidden from the inbox (Zoho keeps it in the Spam view).`
+        : `Delete #${ticket.number}?\n\nIt moves to the Zoho trash and can be restored from Zoho for ~60 days.`;
+    if (!confirm(msg)) return;
+    setActing(true);
+    try {
+      await (kind === "spam" ? api.markSpam(ticket.id) : api.trash(ticket.id));
+      onChanged?.(); // reload the list — the ticket is gone from it
+    } catch (e) {
+      alert(`Could not ${kind === "spam" ? "mark as spam" : "delete"}: ${e.message}`);
+    } finally {
+      setActing(false);
+    }
+  };
 
   // send
   const [sending, setSending] = useState(false);
@@ -482,6 +522,10 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
 
   const send = async () => {
     if (!hasContent) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(toEmail.trim())) {
+      setSendError("Enter a valid recipient email address.");
+      return;
+    }
     if (triage?.lane === "sensitive") {
       const ok = confirm(
         "This ticket was flagged as SENSITIVE (money, legal, or an upset customer). " +
@@ -493,7 +537,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
     setSendError(null);
     try {
       await api.send(
-        ticket.id, ticket.customerEmail, draftHtml, "html",
+        ticket.id, toEmail.trim(), draftHtml, "html",
         aiMeta
           ? {
               aiDraft: aiMeta.draft, intent: aiMeta.intent,
@@ -515,7 +559,33 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
     <div className={`ticket ${sent ? "sent" : ""}`}>
       <div className="ticket-head" onClick={onToggle}>
         <div>
-          <div className="ticket-subj">{ticket.subject}</div>
+          <div className="ticket-subj" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {editingSubj ? (
+              <input
+                autoFocus
+                defaultValue={subj}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveSubject(e.target.value);
+                  if (e.key === "Escape") setEditingSubj(false);
+                }}
+                onBlur={(e) => saveSubject(e.target.value)}
+                style={{ flex: 1, font: "inherit", padding: "2px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "#fffef9" }}
+              />
+            ) : (
+              <>
+                <span>{subj}</span>
+                <button
+                  type="button"
+                  title="Rename ticket"
+                  onClick={(e) => { e.stopPropagation(); setEditingSubj(true); }}
+                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, opacity: 0.45, padding: 2 }}
+                >
+                  ✎
+                </button>
+              </>
+            )}
+          </div>
           <div className="ticket-meta">
             <span className="mono">#{ticket.number}</span>
             <span>{ticket.customerName}</span>
@@ -533,6 +603,22 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
           {sent && <span className="badge sent">✓ Sent</span>}
           <WaitTimer since={ticket.customerResponseTime} status={status} />
           <StatusSelect status={status} options={statusOptions} onChange={changeStatus} saving={statusSaving} />
+          <button
+            className="btn sm"
+            title="Mark as spam (hide from inbox)"
+            disabled={acting}
+            onClick={(e) => { e.stopPropagation(); actOn("spam"); }}
+          >
+            🚫
+          </button>
+          <button
+            className="btn sm"
+            title="Delete (move to Zoho trash)"
+            disabled={acting}
+            onClick={(e) => { e.stopPropagation(); actOn("trash"); }}
+          >
+            🗑
+          </button>
         </div>
       </div>
 
@@ -612,6 +698,26 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
           {hasContent && (
             <>
               {triage && <LaneBanner triage={triage} />}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 8px" }}>
+                <label style={{ fontSize: 13, color: "var(--ink-soft)", flexShrink: 0 }}>To:</label>
+                <input
+                  type="email"
+                  value={toEmail}
+                  disabled={sent || sending}
+                  onChange={(e) => setToEmail(e.target.value)}
+                  style={{ flex: "0 1 340px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+                />
+                {toEmail.trim() !== (ticket.customerEmail || "") && (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    title={`Reset to ${ticket.customerEmail}`}
+                    onClick={() => setToEmail(ticket.customerEmail || "")}
+                  >
+                    ↺
+                  </button>
+                )}
+              </div>
               <RichEditor
                 docKey={docKey}
                 initialHtml={draftHtml}
@@ -628,7 +734,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
                 <button className="btn" onClick={generate} disabled={drafting || sending || sent}>
                   {drafting ? "Regenerating…" : "↻ Regenerate"}
                 </button>
-                {sent && <span style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to {ticket.customerEmail}</span>}
+                {sent && <span style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to {toEmail}</span>}
               </div>
             </>
           )}

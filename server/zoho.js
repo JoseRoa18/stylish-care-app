@@ -175,6 +175,32 @@ export async function updateTicketStatus(ticketId, status) {
   });
 }
 
+// Rename a ticket (the team fixes unhelpful subjects like "Fw: please see").
+export async function updateTicketSubject(ticketId, subject) {
+  if (!subject?.trim()) throw new Error("Missing subject");
+  return zohoFetch(`/tickets/${ticketId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ subject: subject.trim() }),
+  });
+}
+
+// Mark a ticket as spam. Spam tickets disappear from all normal Zoho ticket
+// views (they live in the separate Spam view) — exactly "hide this noise".
+export async function markTicketSpam(ticketId, isSpam = true) {
+  return zohoFetch(`/tickets/markSpam`, {
+    method: "POST",
+    body: JSON.stringify({ ids: [String(ticketId)], isSpam }),
+  });
+}
+
+// Move a ticket to the Zoho recycle bin (restorable from Zoho for ~60 days).
+export async function moveTicketToTrash(ticketId) {
+  return zohoFetch(`/tickets/moveToTrash`, {
+    method: "POST",
+    body: JSON.stringify({ ticketIds: [String(ticketId)] }),
+  });
+}
+
 function normalizeTicket(t) {
   const contact = t.contact || {};
   return {

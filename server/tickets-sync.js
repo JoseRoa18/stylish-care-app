@@ -120,15 +120,25 @@ export async function maybeSync(minMs = 120000) {
   }
 }
 
-// Reflect a status change we just made in Zoho immediately, so the inbox list
-// (read from this table) stays consistent before the next full sync. No-op if
-// the row isn't synced yet — the next sync will insert it.
-export async function touchStatus(ticketId, status) {
+// Reflect a change we just made in Zoho immediately, so the inbox list (read
+// from this table) stays consistent before the next full sync. No-op if the
+// row isn't synced yet — the next sync will insert it.
+export async function touchTicket(ticketId, fields) {
   const now = new Date().toISOString();
   await supabase
     .from("tickets")
-    .update({ status, modified_time: now, synced_at: now })
+    .update({ ...fields, modified_time: now, synced_at: now })
     .eq("id", ticketId);
+}
+
+export const touchStatus = (ticketId, status) => touchTicket(ticketId, { status });
+
+// Remove a ticket from the synced table. Used after marking spam / trashing in
+// Zoho: those tickets vanish from Zoho's normal lists, so the row would
+// otherwise sit stale forever (counted as an active "Open" ticket).
+export async function removeTicketRow(ticketId) {
+  const { error } = await supabase.from("tickets").delete().eq("id", ticketId);
+  if (error) throw new Error(error.message);
 }
 
 // ── read the table back for the inbox (server-side filter + search + paging) ──
