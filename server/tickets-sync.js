@@ -260,6 +260,8 @@ export async function queryTickets({ view = "active", q = "", page = 1, pageSize
   let query = supabase.from("tickets").select("*", { count: "exact" });
 
   if (view === "active") query = query.not("status", "ilike", "%closed%");
+  // "open" mirrors Zoho's "Open Tickets" view: open-TYPE statuses
+  else if (view === "open") query = query.in("status", ["Open", "Escalated"]);
   else if (view === "closed") query = query.ilike("status", "%closed%");
   else if (view && view !== "all") query = query.eq("status", view);
 

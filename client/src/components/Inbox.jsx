@@ -5,10 +5,14 @@ import { api } from "../api.js";
 // computed; everything else is matched as an exact Zoho status. Built dynamically
 // from the live status counts so custom statuses (Awaiting Response, Closed
 // Wayfair, …) show up automatically.
+// Mirrors Zoho's own views: "Open" = Zoho's "Open Tickets" (Open + Escalated,
+// the open-TYPE statuses). The remaining chips are the real statuses with
+// tickets in them (Open/Escalated excluded — they live inside "Open").
 const FIXED_VIEWS = [
-  { key: "active", label: "Active" },
+  { key: "open", label: "Open" },
   { key: "all", label: "All" },
 ];
+const OPEN_TYPE_RE = /^(open|escalated)$/i;
 
 const SORT_OPTIONS = [
   { key: "updated", label: "Last activity" },
@@ -28,7 +32,7 @@ export default function Inbox() {
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState(null);
 
-  const [view, setView] = useState("active");
+  const [view, setView] = useState("open");
   const [sort, setSort] = useState("updated");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -77,13 +81,21 @@ export default function Inbox() {
       </div>
     );
 
-  // status chips, biggest first, after the two fixed views
+  // status chips, biggest first, after the two fixed views (Open/Escalated
+  // are folded into the fixed "Open" chip, like Zoho's view)
   const statusViews = Object.entries(counts.byStatus || {})
+    .filter(([status]) => !OPEN_TYPE_RE.test(status))
     .sort((a, b) => b[1] - a[1])
     .map(([status, n]) => ({ key: status, label: status, n }));
   const statusOptions = Object.keys(counts.byStatus || {});
+  const openCount = Object.entries(counts.byStatus || {})
+    .filter(([s]) => OPEN_TYPE_RE.test(s))
+    .reduce((n, [, c]) => n + c, 0);
   const countFor = (key) =>
-    key === "all" ? counts.all : key === "active" ? counts.active : counts.byStatus?.[key] || 0;
+    key === "all" ? counts.all
+    : key === "open" ? openCount
+    : key === "active" ? counts.active
+    : counts.byStatus?.[key] || 0;
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
