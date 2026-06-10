@@ -36,11 +36,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ticket }),
     }),
-  send: (id, to, content, contentType = "html", feedback) =>
+  send: (id, to, content, contentType = "html", feedback, attachmentIds) =>
     req(`/tickets/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ to, content, contentType, feedback }),
+      body: JSON.stringify({ to, content, contentType, feedback, attachmentIds }),
     }),
+  attachments: (id) => req(`/tickets/${id}/attachments`),
+  attachmentUrl: (id, attId, name) =>
+    `/api/tickets/${id}/attachments/${attId}/download?name=${encodeURIComponent(name || "file")}`,
+  uploadAttachment: async (id, file) => {
+    const res = await fetch(
+      `/api/tickets/${id}/attachments?name=${encodeURIComponent(file.name)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+    return data; // { id, name, size }
+  },
+  related: (id) => req(`/tickets/${id}/related`),
+  merge: (id, ids) =>
+    req(`/tickets/${id}/merge`, { method: "POST", body: JSON.stringify({ ids }) }),
   feedbackMetrics: (days = 90) => req(`/feedback/metrics?days=${days}`),
   setStatus: (id, status) =>
     req(`/tickets/${id}/status`, {

@@ -1,5 +1,5 @@
 // server/routes/tickets.js
-import { Router } from "express";
+import express, { Router } from "express";
 import {
   listTickets,
   getConversation,
@@ -8,11 +8,15 @@ import {
   updateTicketSubject,
   markTicketSpam,
   moveTicketToTrash,
+  listTicketAttachments,
+  downloadTicketAttachment,
+  uploadTicketAttachment,
+  mergeTickets,
   zohoConfigured,
 } from "../zoho.js";
 import { generateDraft } from "../gemini.js";
 import { retrieveRelevant } from "../retrieval.js";
-import { touchStatus, touchTicket, removeTicketRow } from "../tickets-sync.js";
+import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
 
 const router = Router();
@@ -62,9 +66,9 @@ router.post("/:id/draft", async (req, res) => {
 // POST /api/tickets/:id/send  { to, content, contentType?, feedback? }
 router.post("/:id/send", async (req, res) => {
   try {
-    const { to, content, contentType, feedback } = req.body;
+    const { to, content, contentType, feedback, attachmentIds } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: "Empty reply" });
-    const result = await sendReply(req.params.id, { to, content, contentType });
+    const result = await sendReply(req.params.id, { to, content, contentType, attachmentIds });
     // Feedback loop: record how much the agent changed the AI draft. Best-effort
     // — a failure here must never affect the customer-facing send.
     if (feedback?.aiDraft) {
@@ -83,6 +87,75 @@ router.post("/:id/send", async (req, res) => {
       } catch { /* ignore — sending already succeeded */ }
     }
     res.json({ sent: true, result });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/tickets/:id/attachments — all files on the ticket.
+router.get("/:id/attachments", async (req, res) => {
+  try {
+    res.json({ attachments: await listTicketAttachments(req.params.id) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/tickets/:id/attachments/:attId/download — proxy the binary so the
+// browser can open/preview it (Zoho's own URLs require the OAuth header).
+router.get("/:id/attachments/:attId/download", async (req, res) => {
+  try {
+    const { buffer, contentType } = await downloadTicketAttachment(req.params.id, req.params.attId);
+    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(buffer);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/tickets/:id/attachments?name=foo.jpg — upload to attach on a
+// reply. Body is the RAW file bytes (no multipart parsing needed server-side).
+router.post(
+  "/:id/attachments",
+  express.raw({ type: () => true, limit: "15mb" }),
+  async (req, res) => {
+    try {
+      if (!req.body?.length) return res.status(400).json({ error: "Empty file" });
+      const up = await uploadTicketAttachment(req.params.id, {
+        buffer: req.body,
+        filename: String(req.query.name || "attachment"),
+        mime: req.headers["content-type"],
+      });
+      res.json(up);
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  }
+);
+
+// GET /api/tickets/:id/related — other tickets from the same customer.
+router.get("/:id/related", async (req, res) => {
+  try {
+    res.json({ tickets: await relatedTickets(req.params.id) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/tickets/:id/merge  { ids } — fold those tickets into this one.
+router.post("/:id/merge", async (req, res) => {
+  try {
+    const ids = (req.body.ids || []).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ error: "No tickets selected" });
+    await mergeTickets(req.params.id, ids);
+    // merged secondaries vanish from Zoho lists — drop their rows right away
+    for (const id of ids) {
+      try { await removeTicketRow(id); } catch { /* reconcile cleans up later */ }
+    }
+    res.json({ ok: true, merged: ids.length });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

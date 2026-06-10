@@ -173,3 +173,18 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .rich-editor:empty:before { content: "Draft reply…"; color: var(--ink-faint); }
 .rich-editor a { color: var(--brass); }
 .rich-editor ul, .rich-editor ol { margin: 6px 0 6px 22px; }
+
+/* ── email HTML rendering (#9) ───────────────────────────── */
+.email-html { font-size: 13.5px; line-height: 1.55; overflow-x: auto; word-break: break-word; white-space: normal; }
+.email-html p { margin: 0 0 8px; }
+.email-html img { max-width: 100%; height: auto; }
+.email-html table { max-width: 100%; border-collapse: collapse; }
+.email-html td, .email-html th { padding: 2px 6px; }
+.email-html a { color: var(--brass); }
+.email-html ul, .email-html ol { margin: 6px 0 6px 22px; }
+.email-html blockquote { margin: 8px 0 8px 4px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--ink-faint); }
+.email-html.hide-quotes blockquote,
+.email-html.hide-quotes .gmail_quote,
+.email-html.hide-quotes .zmail_extra { display: none; }
+.quote-toggle { margin-top: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 11px; color: var(--ink-faint); cursor: pointer; }
+.quote-toggle:hover { background: var(--line-soft); }

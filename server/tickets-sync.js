@@ -284,6 +284,26 @@ export async function queryTickets({ view = "active", q = "", page = 1, pageSize
   return { tickets: (data || []).map(rowToTicket), total: count || 0 };
 }
 
+// Other tickets from the SAME customer (for the merge picker) — most recent
+// first, active ones floated to the top.
+export async function relatedTickets(ticketId, limit = 20) {
+  const { data: me, error } = await supabase
+    .from("tickets").select("customer_email").eq("id", ticketId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!me?.customer_email) return [];
+  const { data, error: e2 } = await supabase
+    .from("tickets")
+    .select("*")
+    .eq("customer_email", me.customer_email)
+    .neq("id", ticketId)
+    .order("modified_time", { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (e2) throw new Error(e2.message);
+  const rows = (data || []).map(rowToTicket);
+  const closed = (t) => /closed/i.test(t.status || "");
+  return [...rows.filter((t) => !closed(t)), ...rows.filter(closed)];
+}
+
 // Chip counts: All, Active, Closed, and one per real status (dynamic).
 export async function ticketCounts() {
   const { data, error } = await supabase.rpc("tickets_by_status");

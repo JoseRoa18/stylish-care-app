@@ -413,6 +413,63 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   // editable recipient (#2) — reply to a different/extra address when needed
   const [toEmail, setToEmail] = useState(ticket.customerEmail || "");
 
+  // files to attach on the outgoing reply (#6)
+  const [outFiles, setOutFiles] = useState([]); // [{id,name,size}]
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const onPickFiles = async (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = ""; // allow re-picking the same file
+    if (!files.length) return;
+    setUploading(true);
+    setSendError(null);
+    for (const f of files) {
+      try {
+        const up = await api.uploadAttachment(ticket.id, f);
+        setOutFiles((prev) => [...prev, up]);
+      } catch (err) {
+        setSendError(`Could not attach ${f.name}: ${err.message}`);
+      }
+    }
+    setUploading(false);
+  };
+
+  // merge with other tickets from the same customer (#10)
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [related, setRelated] = useState(null);
+  const [mergeSel, setMergeSel] = useState(new Set());
+  const [merging, setMerging] = useState(false);
+  const openMerge = async () => {
+    setMergeOpen((v) => !v);
+    if (!related) {
+      try {
+        const r = await api.related(ticket.id);
+        setRelated(r.tickets || []);
+      } catch {
+        setRelated([]);
+      }
+    }
+  };
+  const doMerge = async () => {
+    const ids = [...mergeSel];
+    if (!ids.length) return;
+    if (!confirm(`Merge ${ids.length} ticket(s) into #${ticket.number}? Their messages move into this ticket. This cannot be undone.`)) return;
+    setMerging(true);
+    try {
+      await api.merge(ticket.id, ids);
+      setMergeOpen(false);
+      setMergeSel(new Set());
+      setRelated(null);
+      setConvoLoaded(false); // re-pull the conversation (now includes merged threads)
+      onChanged?.();
+      loadConversation();
+    } catch (e) {
+      alert(`Merge failed: ${e.message}`);
+    } finally {
+      setMerging(false);
+    }
+  };
+
   // spam / trash
   const [acting, setActing] = useState(false);
   const actOn = async (kind) => {
@@ -437,9 +494,14 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState(null);
 
+  // ticket attachments (#7)
+  const [attachments, setAttachments] = useState([]);
+
   const loadConversation = useCallback(async () => {
     setConvoLoading(true);
     setConvoError(null);
+    // fetch the file list in parallel — non-blocking, best-effort
+    api.attachments(ticket.id).then((r) => setAttachments(r.attachments || [])).catch(() => {});
     try {
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
@@ -545,7 +607,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
               lane: aiMeta.lane, kbCovered: aiMeta.kbCovered,
               kbUsed: aiMeta.usedKb, ticketNumber: ticket.number,
             }
-          : undefined
+          : undefined,
+        outFiles.map((f) => f.id)
       );
       setSent(true);
     } catch (e) {
@@ -668,13 +731,64 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                         <span>{m.direction === "out" ? "Agent" : "Customer"}{m.author ? ` · ${m.author}` : ""}</span>
                         {m.createdTime && <span className="when">{fmtTime(m.createdTime)}</span>}
                       </div>
-                      <div className="text">{txt ? linkifyNodes(txt) : "(no text)"}</div>
+                      <div className="text">
+                        {view === "orig" && m.html ? (
+                          <EmailHtml html={m.html} />
+                        ) : txt ? (
+                          linkifyNodes(txt)
+                        ) : (
+                          "(no text)"
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </>
           )}
+
+          <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
+
+          {/* ── merge with same-customer tickets (#10) ───────── */}
+          <div style={{ marginTop: 10 }}>
+            <button className="btn sm" onClick={openMerge}>
+              ⇄ Merge tickets{mergeOpen ? " ▲" : ""}
+            </button>
+            {mergeOpen && (
+              <div className="card" style={{ marginTop: 8, padding: 12 }}>
+                {!related ? (
+                  <span style={{ fontSize: 13, color: "var(--ink-faint)" }}><span className="spin" /> Looking for tickets from {ticket.customerEmail}…</span>
+                ) : related.length === 0 ? (
+                  <span style={{ fontSize: 13, color: "var(--ink-faint)" }}>No other tickets from this customer.</span>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 8 }}>
+                      Select tickets to merge INTO <b>#{ticket.number}</b> (their messages move here):
+                    </div>
+                    {related.map((r) => (
+                      <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 2px", fontSize: 13, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={mergeSel.has(r.id)}
+                          onChange={(e) => {
+                            const next = new Set(mergeSel);
+                            e.target.checked ? next.add(r.id) : next.delete(r.id);
+                            setMergeSel(next);
+                          }}
+                        />
+                        <span className="mono">#{r.number}</span>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.subject}</span>
+                        <span style={{ fontSize: 11, color: "var(--ink-faint)", flexShrink: 0 }}>{r.status} · {fmtDate(r.createdTime)}</span>
+                      </label>
+                    ))}
+                    <button className="btn sm primary" style={{ marginTop: 8 }} disabled={!mergeSel.size || merging} onClick={doMerge}>
+                      {merging ? <><span className="spin" /> Merging…</> : `Merge ${mergeSel.size || ""} into #${ticket.number}`}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
 
           {draftError && (
             <div className="banner error" style={{ marginTop: 14 }}>Draft failed: {draftError}</div>
@@ -724,10 +838,37 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                 disabled={sent}
                 onChange={setDraftHtml}
               />
+              {/* outgoing attachments (#6) */}
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPickFiles} />
+                {!sent && (
+                  <button className="btn sm" disabled={uploading || sending} onClick={() => fileInputRef.current?.click()}>
+                    {uploading ? <><span className="spin" /> Uploading…</> : "📎 Attach files"}
+                  </button>
+                )}
+                {outFiles.map((f) => (
+                  <span
+                    key={f.id}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 12 }}
+                  >
+                    📎 {f.name} <span style={{ color: "var(--ink-faint)" }}>{fmtBytes(f.size)}</span>
+                    {!sent && (
+                      <button
+                        type="button"
+                        title="Remove"
+                        onClick={() => setOutFiles((prev) => prev.filter((x) => x.id !== f.id))}
+                        style={{ border: "none", background: "none", cursor: "pointer", padding: 0, opacity: 0.6 }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
               {sendError && <div className="banner error" style={{ marginTop: 8 }}>{sendError}</div>}
               <div className="draft-actions">
                 {!sent && (
-                  <button className="btn send" onClick={send} disabled={sending || !hasContent}>
+                  <button className="btn send" onClick={send} disabled={sending || !hasContent || uploading}>
                     {sending ? <><span className="spin" /> Sending…</> : "Approve & Send to customer"}
                   </button>
                 )}
@@ -740,6 +881,71 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Render a message's real (server-sanitized) email HTML, with the quoted
+// reply-chain collapsed behind a toggle so each bubble shows just the new part.
+function EmailHtml({ html }) {
+  const [showQuoted, setShowQuoted] = useState(false);
+  const hasQuoted = /<blockquote|gmail_quote|zmail_extra/i.test(html);
+  return (
+    <>
+      <div
+        className={`email-html ${hasQuoted && !showQuoted ? "hide-quotes" : ""}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      {hasQuoted && (
+        <button type="button" className="quote-toggle" onClick={() => setShowQuoted((v) => !v)}>
+          {showQuoted ? "▲ Hide quoted text" : "··· Show quoted text"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function fmtBytes(n) {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+// Strip of every file on the ticket: image thumbnails + download links (#7).
+function AttachmentStrip({ ticketId, attachments }) {
+  if (!attachments?.length) return null;
+  return (
+    <div style={{ margin: "12px 0 4px" }}>
+      <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>
+        📎 Attachments ({attachments.length})
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {attachments.map((a) => {
+          const url = api.attachmentUrl(ticketId, a.id, a.name);
+          return IMAGE_RE.test(a.name || "") ? (
+            <a key={a.id} href={url} target="_blank" rel="noreferrer" title={`${a.name} · ${fmtBytes(a.size)}`}>
+              <img
+                src={url}
+                alt={a.name}
+                style={{ height: 86, maxWidth: 150, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block" }}
+              />
+            </a>
+          ) : (
+            <a
+              key={a.id}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, textDecoration: "none", color: "var(--ink)" }}
+            >
+              📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
+            </a>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -260,7 +260,30 @@ function stripQuoted(text) {
   return t.slice(0, cut).trim();
 }
 
-// Read a ticket's recent conversation as plain text.
+// Sanitize an email's HTML so it's safe to render in the app: drop scripts,
+// styles, frames, event handlers and javascript: URLs; unwrap full-document
+// shells; remove cid: inline images (they can't load outside the mail client —
+// the real files show up in the Attachments strip instead).
+function sanitizeEmailHtml(html) {
+  let s = String(html || "");
+  if (!s.trim()) return "";
+  s = s
+    .replace(/<!DOCTYPE[^>]*>/gi, "")
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<\/?(html|body)[^>]*>/gi, "")
+    .replace(/<(script|style|iframe|object|embed|title)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<(script|style|iframe|object|embed|link|meta|base|form|input|button)[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
+    .replace(/<img[^>]*src=["']?cid:[^>]*>/gi, "");
+  return s.trim();
+}
+
+// Read a ticket's recent conversation. Each message carries BOTH:
+//  • text — quoted-chain-stripped plain text (what the AI and translator use)
+//  • html — the sanitized original email HTML (what the inbox renders, so
+//    formatting/tables/links survive instead of a mangled wall of text)
+//  • attachments — name/size/id of files on that message
 export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
   const list = await zohoFetch(
     `/tickets/${ticketId}/threads?limit=${maxThreads}`
@@ -280,6 +303,12 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
         author: full.author?.name || th.author?.name || "",
         createdTime: full.createdTime || th.createdTime,
         text: stripQuoted(full.plainText || full.summary || th.summary || ""),
+        html: sanitizeEmailHtml(full.content || ""),
+        attachments: (full.attachments || th.attachments || []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          size: a.size,
+        })),
       });
     } catch {
       out.push({
@@ -289,6 +318,8 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
         author: th.author?.name || "",
         createdTime: th.createdTime,
         text: (th.summary || "").trim(),
+        html: "",
+        attachments: [],
       });
     }
   }
@@ -298,8 +329,9 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
 }
 
 // Send a reply directly to the customer (not a draft). `contentType` is
-// "html" by default so rich-text (bold/italic/lists) is preserved.
-export async function sendReply(ticketId, { to, content, contentType = "html" }) {
+// "html" by default so rich-text (bold/italic/lists) is preserved. Pass
+// `attachmentIds` (from uploadTicketAttachment) to attach files.
+export async function sendReply(ticketId, { to, content, contentType = "html", attachmentIds }) {
   if (!to) throw new Error("Missing customer email address for reply.");
   const body = {
     channel: "EMAIL",
@@ -308,9 +340,74 @@ export async function sendReply(ticketId, { to, content, contentType = "html" })
     content,
     contentType,
   };
+  if (Array.isArray(attachmentIds) && attachmentIds.length) {
+    body.attachmentIds = attachmentIds.map(String);
+  }
   return zohoFetch(`/tickets/${ticketId}/sendReply`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+// ── ticket attachments (view + upload) ───────────────────────
+
+// All files attached to a ticket (Zoho aggregates them across the thread).
+export async function listTicketAttachments(ticketId) {
+  const data = await zohoFetch(`/tickets/${ticketId}/attachments?limit=50`);
+  return (data?.data || []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    size: Number(a.size) || 0,
+    createdTime: a.createdTime,
+  }));
+}
+
+// Binary content of one attachment (the app proxies this to the browser —
+// Zoho's own links need the OAuth header, which a browser can't send).
+export async function downloadTicketAttachment(ticketId, attachmentId) {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `${ZOHO_API_BASE}/tickets/${ticketId}/attachments/${attachmentId}/content`,
+    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
+  );
+  if (!res.ok) throw new Error(`Zoho attachment download failed (${res.status})`);
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+  };
+}
+
+// Upload a file onto the ticket; returns { id } to reference in sendReply.
+export async function uploadTicketAttachment(ticketId, { buffer, filename, mime }) {
+  const token = await getAccessToken();
+  const fd = new FormData();
+  fd.append(
+    "file",
+    new Blob([buffer], { type: mime || "application/octet-stream" }),
+    filename || "attachment"
+  );
+  const res = await fetch(`${ZOHO_API_BASE}/tickets/${ticketId}/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID },
+    body: fd, // fetch sets the multipart boundary header itself
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id) {
+    throw new Error(
+      `Zoho attachment upload failed (${res.status}): ${data.message || data.errorCode || "unknown"}`
+    );
+  }
+  return { id: data.id, name: data.name || filename, size: Number(data.size) || buffer.length };
+}
+
+// ── merge tickets ────────────────────────────────────────────
+// Merge `secondaryIds` INTO `primaryId` (Zoho folds their threads in; the
+// secondaries then disappear from all ticket lists).
+export async function mergeTickets(primaryId, secondaryIds) {
+  if (!secondaryIds?.length) throw new Error("No tickets selected to merge");
+  return zohoFetch(`/tickets/${primaryId}/merge`, {
+    method: "POST",
+    body: JSON.stringify({ ids: secondaryIds.map(String) }),
   });
 }
 
