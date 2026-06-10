@@ -129,12 +129,15 @@ export function createApp() {
   app.get("/api/dashboard", async (_req, res) => {
     try {
       await maybeSync(); // keep the tickets table fresh (throttled to ~2 min)
-      const [kb, metrics, byStatusRows, byChannelRows, perDayRows] = await Promise.all([
+      const [kb, metrics, byStatusRows, byChannelRows, perDayRows, openWaitRows] = await Promise.all([
         sourceCounts(),
         supabase.rpc("ticket_metrics"),
         supabase.rpc("tickets_by_status"),
         supabase.rpc("tickets_by_channel"),
         supabase.rpc("tickets_per_day", { num_days: 7 }),
+        // wait times for open-TYPE tickets only — Awaiting Response means the
+        // ball is in the CUSTOMER's court, so it doesn't belong in "avg wait"
+        supabase.from("tickets").select("customer_response_time").in("status", ["Open", "Escalated"]),
       ]);
       const m = metrics.data || {};
       const round = (x) => (x != null ? Math.round(Number(x)) : null);
@@ -150,6 +153,12 @@ export function createApp() {
       const openNow = Object.entries(byStatus)
         .filter(([s]) => /^(open|escalated)$/i.test(s))
         .reduce((n, [, c]) => n + c, 0);
+      const waits = (openWaitRows.data || [])
+        .filter((r) => r.customer_response_time)
+        .map((r) => Date.now() - new Date(r.customer_response_time).getTime())
+        .filter((ms) => ms >= 0);
+      const openAvgWaitMs = waits.length ? waits.reduce((s, x) => s + x, 0) / waits.length : null;
+      const openOldestWaitMs = waits.length ? Math.max(...waits) : null;
       const perDay = (perDayRows.data || []).map((r) => ({
         label: new Date(r.day + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
         count: Number(r.count),
@@ -166,8 +175,8 @@ export function createApp() {
         closed: m.closed || 0,
         byStatus,
         byChannel,
-        avgWaitMs: round(m.avgWaitMs),
-        oldestWaitMs: round(m.oldestWaitMs),
+        avgWaitMs: round(openAvgWaitMs),
+        oldestWaitMs: round(openOldestWaitMs),
         avgResolutionMs: round(m.avgResolutionMs),
         resolvedSample: m.resolvedSample || 0,
         perDay,

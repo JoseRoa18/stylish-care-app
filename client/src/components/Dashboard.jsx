@@ -62,8 +62,8 @@ export default function Dashboard({ onOpenInbox }) {
           value={data.openNow ?? data.active}
           sub={`incl. escalated · ${data.active} active total · ${data.closed} closed`}
         />
-        <Metric label="Avg wait (active)" value={fmtDuration(data.avgWaitMs)} color={waitColor(data.avgWaitMs)} sub={`oldest ${fmtDuration(data.oldestWaitMs)}`} />
-        <Metric label="Avg resolution" value={fmtDuration(data.avgResolutionMs)} sub={`${data.resolvedSample || 0} closed sampled`} />
+        <Metric label="Avg wait (open)" value={fmtDuration(data.avgWaitMs)} color={waitColor(data.avgWaitMs)} sub={`open + escalated · oldest ${fmtDuration(data.oldestWaitMs)}`} />
+        <Metric label="Avg resolution" value={fmtDuration(data.avgResolutionMs)} sub={`over ${data.resolvedSample || 0} closed tickets`} />
         <Metric label="KB articles" value={data.kbArticles} />
       </div>
 
