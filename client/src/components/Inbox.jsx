@@ -376,6 +376,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
   const [view, setView] = useState("orig");
   const [xcache, setXcache] = useState({});
   const [xlating, setXlating] = useState(false);
+  const [xError, setXError] = useState(null);
 
   // AI draft + triage (rich-text)
   const [draftHtml, setDraftHtml] = useState("");
@@ -447,7 +448,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
       return;
     }
     setXlating(true);
-    setConvoError(null);
+    setXError(null);
     try {
       const target = lang === "es" ? "Spanish" : "English";
       const { translations } = await api.translate(
@@ -457,7 +458,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
       setXcache((c) => ({ ...c, [lang]: translations }));
       setView(lang);
     } catch (e) {
-      setConvoError(`Translation failed: ${e.message}`);
+      setXError(e.message);
     } finally {
       setXlating(false);
     }
@@ -557,8 +558,14 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
           {conversation && conversation.length > 0 && (
             <>
               <div className="convo-bar">
-                <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-                  {xlating ? "Translating…" : view === "orig" ? "Conversation" : `Translated to ${view === "es" ? "Spanish" : "English"}`}
+                <span style={{ fontSize: 12, color: xError ? "#c0392b" : "var(--ink-faint)" }}>
+                  {xlating
+                    ? "Translating…"
+                    : xError
+                    ? `Couldn't translate (${xError})`
+                    : view === "orig"
+                    ? "Conversation"
+                    : `Translated to ${view === "es" ? "Spanish" : "English"}`}
                 </span>
                 <div className="seg">
                   <button className={view === "orig" ? "active" : ""} disabled={xlating} onClick={() => translateTo("orig")}>Original</button>
