@@ -36,11 +36,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ticket }),
     }),
-  send: (id, to, content, contentType = "html") =>
+  send: (id, to, content, contentType = "html", feedback) =>
     req(`/tickets/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ to, content, contentType }),
+      body: JSON.stringify({ to, content, contentType, feedback }),
     }),
+  feedbackMetrics: (days = 90) => req(`/feedback/metrics?days=${days}`),
   setStatus: (id, status) =>
     req(`/tickets/${id}/status`, {
       method: "POST",

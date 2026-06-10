@@ -24,10 +24,14 @@ function waitColor(ms) {
 
 export default function Dashboard({ onOpenInbox }) {
   const [data, setData] = useState(null);
+  const [fb, setFb] = useState(null);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
-    const load = () => api.dashboard().then(setData).catch((e) => setErr(e.message));
+    const load = () => {
+      api.dashboard().then(setData).catch((e) => setErr(e.message));
+      api.feedbackMetrics(90).then(setFb).catch(() => {});
+    };
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
@@ -77,6 +81,12 @@ export default function Dashboard({ onOpenInbox }) {
         <ColumnChart data={data.perDay || []} />
       </div>
 
+      {/* ── AI reply quality (feedback loop) ─────────────── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="chart-title">AI reply quality · last 90 days</div>
+        <AiQuality fb={fb} />
+      </div>
+
       {/* ── footer ───────────────────────────────────────── */}
       <div className="card" style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div style={{ display: "flex", gap: 16, fontSize: 13 }}>
@@ -91,6 +101,66 @@ export default function Dashboard({ onOpenInbox }) {
         <button className="btn sm" onClick={onOpenInbox}>Go to Inbox →</button>
       </div>
     </>
+  );
+}
+
+// AI acceptance: how often agents send the AI draft as-is vs edit/rewrite it,
+// plus which topics get rewritten most (where the KB/prompt needs work).
+function AiQuality({ fb }) {
+  if (!fb) return <div style={{ color: "var(--ink-faint)", fontSize: 13, marginTop: 6 }}>Loading…</div>;
+  const total = fb.total || 0;
+  if (!total)
+    return (
+      <div style={{ color: "var(--ink-faint)", fontSize: 13, marginTop: 6 }}>
+        No AI replies sent yet. As the team approves & sends AI-assisted replies, this will show how
+        often they go out unchanged vs edited — and which topics need work.
+      </div>
+    );
+  const pct = (n) => Math.round((n / total) * 100);
+  const segs = [
+    { label: "Sent as-is", n: fb.asIs || 0, color: "#3b7a57" },
+    { label: "Lightly edited", n: fb.light || 0, color: "#c8912a" },
+    { label: "Rewritten", n: fb.heavy || 0, color: "#c0392b" },
+  ];
+  const intents = (fb.byIntent || [])
+    .map((r) => ({ ...r, rewritten: r.total ? Math.round((r.heavy / r.total) * 100) : 0 }))
+    .sort((a, b) => b.rewritten - a.rewritten)
+    .slice(0, 8);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
+        <span style={{ fontSize: 30, fontWeight: 700, color: "#3b7a57" }}>{pct(fb.asIs || 0)}%</span>
+        <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>sent without changes · {total} replies measured</span>
+      </div>
+      <div style={{ display: "flex", height: 16, borderRadius: 6, overflow: "hidden", background: "var(--line-soft)" }}>
+        {segs.map((s) => s.n > 0 && (
+          <div key={s.label} title={`${s.label}: ${s.n}`} style={{ width: `${pct(s.n)}%`, background: s.color }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
+        {segs.map((s) => (
+          <span key={s.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--ink-soft)" }}>
+            <i style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} /> {s.label}: <b>{s.n}</b> ({pct(s.n)}%)
+          </span>
+        ))}
+      </div>
+      {intents.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>By topic — where the AI gets rewritten most</div>
+          {intents.map((r) => (
+            <div key={r.intent} style={{ display: "flex", alignItems: "center", gap: 10, margin: "5px 0" }}>
+              <span style={{ width: 130, fontSize: 12, color: "var(--ink-soft)", textAlign: "right", flexShrink: 0 }}>
+                {(r.intent || "").replace(/_/g, " ")}
+              </span>
+              <div style={{ flex: 1, background: "var(--line-soft)", borderRadius: 6, height: 14 }}>
+                <div style={{ width: `${r.rewritten}%`, height: "100%", background: "#c0392b", borderRadius: 6, minWidth: r.rewritten > 0 ? 4 : 0 }} />
+              </div>
+              <span className="mono" style={{ width: 70, fontSize: 11, textAlign: "right" }}>{r.rewritten}% · {r.total}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

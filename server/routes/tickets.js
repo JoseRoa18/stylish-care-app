@@ -4,6 +4,7 @@ import { listTickets, getConversation, sendReply, updateTicketStatus, zohoConfig
 import { generateDraft } from "../gemini.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus } from "../tickets-sync.js";
+import { recordFeedback } from "../feedback.js";
 
 const router = Router();
 
@@ -49,12 +50,29 @@ router.post("/:id/draft", async (req, res) => {
   }
 });
 
-// POST /api/tickets/:id/send  { to, content, contentType? }
+// POST /api/tickets/:id/send  { to, content, contentType?, feedback? }
 router.post("/:id/send", async (req, res) => {
   try {
-    const { to, content, contentType } = req.body;
+    const { to, content, contentType, feedback } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: "Empty reply" });
     const result = await sendReply(req.params.id, { to, content, contentType });
+    // Feedback loop: record how much the agent changed the AI draft. Best-effort
+    // — a failure here must never affect the customer-facing send.
+    if (feedback?.aiDraft) {
+      try {
+        await recordFeedback({
+          ticket: { id: req.params.id, number: feedback.ticketNumber },
+          aiDraft: feedback.aiDraft,
+          sentText: content,
+          intent: feedback.intent,
+          confidence: feedback.confidence,
+          lane: feedback.lane,
+          sensitive: feedback.sensitive,
+          kbCovered: feedback.kbCovered,
+          kbUsed: feedback.kbUsed,
+        });
+      } catch { /* ignore — sending already succeeded */ }
+    }
     res.json({ sent: true, result });
   } catch (err) {
     res.status(502).json({ error: err.message });

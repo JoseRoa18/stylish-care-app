@@ -381,6 +381,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
   const [draftHtml, setDraftHtml] = useState("");
   const [docKey, setDocKey] = useState(0);
   const [triage, setTriage] = useState(null);
+  // the ORIGINAL AI draft + triage, kept unmutated so we can measure how much
+  // the agent edited it when they send (the feedback loop).
+  const [aiMeta, setAiMeta] = useState(null);
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState(null);
 
@@ -425,6 +428,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
       setTriage({
         lane: res.lane, label: res.label, intent: res.intent,
         confidence: res.confidence, sensitive: res.sensitive,
+      });
+      setAiMeta({
+        draft: res.draft, intent: res.intent, confidence: res.confidence,
+        sensitive: res.sensitive, lane: res.lane, kbCovered: res.kbCovered,
+        usedKb: res.usedKb,
       });
     } catch (e) {
       setDraftError(e.message);
@@ -483,7 +491,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [] }) {
     setSending(true);
     setSendError(null);
     try {
-      await api.send(ticket.id, ticket.customerEmail, draftHtml, "html");
+      await api.send(
+        ticket.id, ticket.customerEmail, draftHtml, "html",
+        aiMeta
+          ? {
+              aiDraft: aiMeta.draft, intent: aiMeta.intent,
+              confidence: aiMeta.confidence, sensitive: aiMeta.sensitive,
+              lane: aiMeta.lane, kbCovered: aiMeta.kbCovered,
+              kbUsed: aiMeta.usedKb, ticketNumber: ticket.number,
+            }
+          : undefined
+      );
       setSent(true);
     } catch (e) {
       setSendError(e.message);

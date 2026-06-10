@@ -19,6 +19,7 @@ import { sourceCounts } from "./kb.js";
 import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
+import { feedbackMetrics } from "./feedback.js";
 import {
   authEnabled,
   checkPassword,
@@ -164,6 +165,15 @@ export function createApp() {
         lastFetch: new Date().toISOString(),
         error: null,
       });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/feedback/metrics", async (req, res) => {
+    try {
+      const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
+      res.json(await feedbackMetrics(days));
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
