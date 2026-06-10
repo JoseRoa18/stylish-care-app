@@ -24,6 +24,20 @@ function dense(text) {
   return (text || "").replace(/\s+/g, "").length;
 }
 
+// A text layer can clear the density bar yet still be junk: scanned spec sheets
+// often extract as glued runs ("HANDMADESTAINLESSSTEEL") with the words' spaces
+// lost. Detect that so we still OCR them. Normal prose averages ~5-6 letters per
+// run; glued specs run much longer.
+function fragmented(text) {
+  const t = text || "";
+  const letters = (t.match(/[a-zA-Z]/g) || []).length;
+  if (letters < 80) return true;
+  const runs = t.match(/[a-zA-Z]{2,}/g) || [];
+  if (!runs.length) return true;
+  const avgRun = runs.reduce((s, w) => s + w.length, 0) / runs.length;
+  return avgRun > 11;
+}
+
 async function textLayer(buffer) {
   try {
     const { PDFParse } = await import("pdf-parse");
@@ -79,7 +93,12 @@ async function geminiOcr(buffer) {
 // text-layer-sparse | too-large-for-ocr.
 export async function extractPdfText(buffer) {
   const layer = await textLayer(buffer);
-  if (dense(layer) >= MIN_TEXT_CHARS) return { text: layer, method: "text-layer" };
+  const d = dense(layer);
+  // A multi-MB PDF that yields almost no text is an image scan — OCR it even if
+  // it squeaks past the char floor (e.g. a 7 MB spec sheet with 208 chars).
+  const imageHeavy = buffer.length > 1_500_000 && d < 900;
+  const goodLayer = d >= MIN_TEXT_CHARS && !fragmented(layer) && !imageHeavy;
+  if (goodLayer) return { text: layer, method: "text-layer" };
 
   if (!GEMINI_API_KEY) return { text: layer, method: "text-layer-sparse" };
   if (buffer.length > INLINE_LIMIT)
