@@ -276,6 +276,14 @@ function sanitizeEmailHtml(html) {
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
     .replace(/<img[^>]*src=["']?cid:[^>]*>/gi, "");
+  // Inline images come with Zoho-relative signed URLs that only work inside
+  // Zoho's own UI — route them through our authenticated proxy instead.
+  s = s.replace(/src=["'](\/supportapi\/api\/v1\/threads\/\d+\/inlineImages\/[^"']+)["']/gi, (_m, path) => {
+    const clean = path.replace(/&amp;/g, "&");
+    return `src="/api/tickets/inline-image?src=${encodeURIComponent(clean)}"`;
+  });
+  // Any other relative-src image can never load outside Zoho — drop it.
+  s = s.replace(/<img[^>]*src=["']\/(?!api\/tickets\/inline-image)[^"']*["'][^>]*>/gi, "");
   return s.trim();
 }
 
@@ -420,6 +428,24 @@ export async function uploadTicketAttachment(ticketId, { buffer, filename, mime 
     );
   }
   return { id: data.id, name: data.name || filename, size: Number(data.size) || buffer.length };
+}
+
+// Inline image from an email body (signed Zoho path, needs our OAuth header).
+// The path is validated strictly so this can only proxy Zoho inline images.
+export async function fetchInlineImage(srcPath) {
+  if (!/^\/supportapi\/api\/v1\/threads\/\d+\/inlineImages\/[A-Za-z0-9]+(\?[^\s]*)?$/.test(srcPath)) {
+    throw new Error("Invalid inline image path");
+  }
+  const token = await getAccessToken();
+  const url = `${ZOHO_API_BASE}${srcPath.replace("/supportapi/api/v1", "")}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID },
+  });
+  if (!res.ok) throw new Error(`Zoho inline image fetch failed (${res.status})`);
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get("content-type") || "image/png",
+  };
 }
 
 // ── merge tickets ────────────────────────────────────────────

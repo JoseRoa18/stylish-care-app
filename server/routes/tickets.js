@@ -11,6 +11,7 @@ import {
   listTicketAttachments,
   downloadTicketAttachment,
   uploadTicketAttachment,
+  fetchInlineImage,
   mergeTickets,
   zohoConfigured,
 } from "../zoho.js";
@@ -87,6 +88,20 @@ router.post("/:id/send", async (req, res) => {
       } catch { /* ignore — sending already succeeded */ }
     }
     res.json({ sent: true, result });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/tickets/inline-image?src=… — proxy a Zoho inline email image (their
+// signed relative URLs only resolve inside Zoho's UI). Declared before the
+// /:id routes; the src path is strictly validated in fetchInlineImage.
+router.get("/inline-image", async (req, res) => {
+  try {
+    const { buffer, contentType } = await fetchInlineImage(String(req.query.src || ""));
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.send(buffer);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
