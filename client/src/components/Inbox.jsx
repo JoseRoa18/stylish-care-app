@@ -764,6 +764,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                           "(no text)"
                         )}
                       </div>
+                      <MessageAttachments ticketId={ticket.id} threadId={m.id} attachments={m.attachments} />
                     </div>
                   );
                 })}
@@ -1012,6 +1013,42 @@ function AttachmentStrip({ ticketId, attachments }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Files attached to ONE message — rendered inside its bubble (like Zoho does).
+function MessageAttachments({ ticketId, threadId, attachments }) {
+  if (!attachments?.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+      {attachments.map((a) => {
+        const url = api.threadAttachmentUrl(ticketId, threadId, a.id, a.name);
+        return IMAGE_RE.test(a.name || "") ? (
+          <a
+            key={a.id}
+            href={url}
+            title={`${a.name} · ${fmtBytes(a.size)}`}
+            onClick={(e) => { e.preventDefault(); openLightbox(url); }}
+          >
+            <img
+              src={url}
+              alt={a.name}
+              style={{ height: 74, maxWidth: 130, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block", cursor: "zoom-in" }}
+            />
+          </a>
+        ) : (
+          <a
+            key={a.id}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 12, textDecoration: "none", color: "var(--ink)" }}
+          >
+            📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
+          </a>
+        );
+      })}
     </div>
   );
 }

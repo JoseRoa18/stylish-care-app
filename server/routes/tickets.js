@@ -10,6 +10,7 @@ import {
   moveTicketToTrash,
   listTicketAttachments,
   downloadTicketAttachment,
+  downloadThreadAttachment,
   uploadTicketAttachment,
   fetchInlineImage,
   mergeTickets,
@@ -121,6 +122,23 @@ router.get("/:id/attachments", async (req, res) => {
 router.get("/:id/attachments/:attId/download", async (req, res) => {
   try {
     const { buffer, contentType } = await downloadTicketAttachment(req.params.id, req.params.attId);
+    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(buffer);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET …/threads/:threadId/attachments/:attId/download — proxy a file that
+// belongs to ONE message (different Zoho namespace than ticket attachments).
+router.get("/:id/threads/:threadId/attachments/:attId/download", async (req, res) => {
+  try {
+    const { buffer, contentType } = await downloadThreadAttachment(
+      req.params.id, req.params.threadId, req.params.attId
+    );
     const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
     res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Disposition", `inline; filename="${name}"`);

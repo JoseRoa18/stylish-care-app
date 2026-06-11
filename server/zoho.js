@@ -407,6 +407,21 @@ export async function downloadTicketAttachment(ticketId, attachmentId) {
   };
 }
 
+// Binary content of an attachment that belongs to ONE message (thread) — these
+// live in a different namespace than ticket-level attachments.
+export async function downloadThreadAttachment(ticketId, threadId, attachmentId) {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `${ZOHO_API_BASE}/tickets/${ticketId}/threads/${threadId}/attachments/${attachmentId}/content`,
+    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
+  );
+  if (!res.ok) throw new Error(`Zoho thread attachment download failed (${res.status})`);
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+  };
+}
+
 // Upload a file onto the ticket; returns { id } to reference in sendReply.
 export async function uploadTicketAttachment(ticketId, { buffer, filename, mime }) {
   const token = await getAccessToken();
