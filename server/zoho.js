@@ -22,10 +22,67 @@ const STATUSES = (ZOHO_TICKET_STATUS || "Open")
   .filter(Boolean);
 
 // ── access token cache ───────────────────────────────────────
+// Two layers: in-memory (warm instance) + a SHARED row in Supabase, so every
+// serverless instance and script reuses ONE token instead of each minting its
+// own — Zoho rate-limits refresh-token usage ("too many requests") hard.
 let _token = null; // { value, expiresAt }
 
 function configured() {
   return Boolean(ZOHO_CLIENT_ID && ZOHO_CLIENT_SECRET && ZOHO_REFRESH_TOKEN);
+}
+
+function tokenFresh(t) {
+  return t && t.value && t.expiresAt - 60_000 > Date.now();
+}
+
+async function readSharedToken() {
+  try {
+    const { supabase } = await import("./supabase.js");
+    if (!supabase) return null;
+    const { data } = await supabase
+      .from("app_state").select("value").eq("key", "zoho_token").maybeSingle();
+    return tokenFresh(data?.value) ? data.value : null;
+  } catch {
+    return null; // table may not exist yet — memory-only mode
+  }
+}
+
+async function writeSharedToken(tok) {
+  try {
+    const { supabase } = await import("./supabase.js");
+    if (!supabase) return;
+    await supabase
+      .from("app_state")
+      .upsert({ key: "zoho_token", value: tok, updated_at: new Date().toISOString() });
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function mintToken(attempt = 0) {
+  const url =
+    `${ZOHO_ACCOUNTS_BASE}/token` +
+    `?refresh_token=${encodeURIComponent(ZOHO_REFRESH_TOKEN)}` +
+    `&client_id=${encodeURIComponent(ZOHO_CLIENT_ID)}` +
+    `&client_secret=${encodeURIComponent(ZOHO_CLIENT_SECRET)}` +
+    `&grant_type=refresh_token`;
+  const res = await fetch(url, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    // Throttled? Another instance may have minted meanwhile — reuse theirs,
+    // else back off briefly and retry.
+    if (/too many requests/i.test(data.error_description || "") && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+      const shared = await readSharedToken();
+      if (shared) return shared;
+      return mintToken(attempt + 1);
+    }
+    throw new Error(`Zoho token refresh failed (${res.status}): ${JSON.stringify(data)}`);
+  }
+  return {
+    value: data.access_token,
+    expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+  };
 }
 
 async function getAccessToken() {
@@ -34,31 +91,14 @@ async function getAccessToken() {
       "Zoho is not configured. Set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN in .env"
     );
   }
-  // reuse cached token until ~1 min before expiry
-  if (_token && _token.expiresAt - 60_000 > Date.now()) {
+  if (tokenFresh(_token)) return _token.value;
+  const shared = await readSharedToken();
+  if (shared) {
+    _token = shared;
     return _token.value;
   }
-
-  const url =
-    `${ZOHO_ACCOUNTS_BASE}/token` +
-    `?refresh_token=${encodeURIComponent(ZOHO_REFRESH_TOKEN)}` +
-    `&client_id=${encodeURIComponent(ZOHO_CLIENT_ID)}` +
-    `&client_secret=${encodeURIComponent(ZOHO_CLIENT_SECRET)}` +
-    `&grant_type=refresh_token`;
-
-  const res = await fetch(url, { method: "POST" });
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok || !data.access_token) {
-    throw new Error(
-      `Zoho token refresh failed (${res.status}): ${JSON.stringify(data)}`
-    );
-  }
-
-  _token = {
-    value: data.access_token,
-    expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
-  };
+  _token = await mintToken();
+  await writeSharedToken(_token);
   return _token.value;
 }
 
@@ -93,7 +133,9 @@ async function zohoFetch(path, options = {}, _retried = false) {
       body?.errorCode === "INVALID_OAUTH" ||
       /oauth token/i.test(body?.message || "");
     if (invalidToken && !_retried) {
-      _token = null; // bust the cache so getAccessToken re-mints
+      // force-mint (the shared cached token is the invalid one) and retry once
+      _token = await mintToken();
+      await writeSharedToken(_token);
       return zohoFetch(path, options, true);
     }
     const msg =

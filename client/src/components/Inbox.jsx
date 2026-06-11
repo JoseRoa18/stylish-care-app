@@ -976,6 +976,47 @@ function fmtBytes(n) {
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
+const fileChipStyle = {
+  display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px",
+  border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9",
+  fontSize: 12, textDecoration: "none", color: "var(--ink)",
+};
+
+// Image thumbnail: lazy-loaded over a soft placeholder, opens the lightbox on
+// click, and degrades to a file chip if the image can't load.
+function Thumb({ url, name, size, height = 74 }) {
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  if (failed)
+    return (
+      <a href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>
+        🖼 {name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
+      </a>
+    );
+  return (
+    <a
+      href={url}
+      title={`${name} · ${fmtBytes(size)} — click to enlarge`}
+      onClick={(e) => { e.preventDefault(); openLightbox(url); }}
+      style={{ display: "block" }}
+    >
+      <img
+        src={url}
+        alt={name}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        style={{
+          height, minWidth: loaded ? 0 : 96, maxWidth: 160, objectFit: "cover",
+          borderRadius: 8, border: "1px solid var(--line)", display: "block",
+          cursor: "zoom-in", background: "var(--line-soft)",
+          opacity: loaded ? 1 : 0.45, transition: "opacity .25s",
+        }}
+      />
+    </a>
+  );
+}
+
 // Strip of every file on the ticket: image thumbnails + download links (#7).
 function AttachmentStrip({ ticketId, attachments }) {
   if (!attachments?.length) return null;
@@ -988,26 +1029,9 @@ function AttachmentStrip({ ticketId, attachments }) {
         {attachments.map((a) => {
           const url = api.attachmentUrl(ticketId, a.id, a.name);
           return IMAGE_RE.test(a.name || "") ? (
-            <a
-              key={a.id}
-              href={url}
-              title={`${a.name} · ${fmtBytes(a.size)}`}
-              onClick={(e) => { e.preventDefault(); openLightbox(url); }}
-            >
-              <img
-                src={url}
-                alt={a.name}
-                style={{ height: 86, maxWidth: 150, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block", cursor: "zoom-in" }}
-              />
-            </a>
+            <Thumb key={a.id} url={url} name={a.name} size={a.size} height={86} />
           ) : (
-            <a
-              key={a.id}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, textDecoration: "none", color: "var(--ink)" }}
-            >
+            <a key={a.id} href={url} target="_blank" rel="noreferrer" style={{ ...fileChipStyle, fontSize: 13 }}>
               📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
             </a>
           );
@@ -1025,26 +1049,9 @@ function MessageAttachments({ ticketId, threadId, attachments }) {
       {attachments.map((a) => {
         const url = api.threadAttachmentUrl(ticketId, threadId, a.id, a.name);
         return IMAGE_RE.test(a.name || "") ? (
-          <a
-            key={a.id}
-            href={url}
-            title={`${a.name} · ${fmtBytes(a.size)}`}
-            onClick={(e) => { e.preventDefault(); openLightbox(url); }}
-          >
-            <img
-              src={url}
-              alt={a.name}
-              style={{ height: 74, maxWidth: 130, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block", cursor: "zoom-in" }}
-            />
-          </a>
+          <Thumb key={a.id} url={url} name={a.name} size={a.size} />
         ) : (
-          <a
-            key={a.id}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 12, textDecoration: "none", color: "var(--ink)" }}
-          >
+          <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>
             📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
           </a>
         );
