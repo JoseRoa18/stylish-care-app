@@ -464,6 +464,36 @@ export async function downloadThreadAttachment(ticketId, threadId, attachmentId)
   };
 }
 
+// Photos the CUSTOMER attached to their recent messages, as base64 for the
+// AI's multimodal draft (newest first; capped so the request stays light).
+const AI_IMAGE_RE = /\.(png|jpe?g|webp)$/i;
+export async function fetchConversationImages(
+  ticketId,
+  conversation,
+  { maxImages = 4, maxBytesEach = 6_000_000 } = {}
+) {
+  const images = [];
+  for (const m of [...conversation].reverse()) {
+    if (m.direction === "out") continue;
+    for (const a of m.attachments || []) {
+      if (images.length >= maxImages) return images;
+      if (!AI_IMAGE_RE.test(a.name || "")) continue;
+      if (a.size && a.size > maxBytesEach) continue;
+      try {
+        const { buffer, contentType } = await downloadThreadAttachment(ticketId, m.id, a.id);
+        images.push({
+          name: a.name,
+          mime: (contentType || "image/jpeg").split(";")[0],
+          data: buffer.toString("base64"),
+        });
+      } catch {
+        /* photo unavailable — the draft just proceeds without it */
+      }
+    }
+  }
+  return images;
+}
+
 // Upload a file onto the ticket; returns { id } to reference in sendReply.
 export async function uploadTicketAttachment(ticketId, { buffer, filename, mime }) {
   const token = await getAccessToken();

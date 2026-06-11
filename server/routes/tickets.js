@@ -13,6 +13,7 @@ import {
   downloadThreadAttachment,
   uploadTicketAttachment,
   fetchInlineImage,
+  fetchConversationImages,
   mergeTickets,
   zohoConfigured,
 } from "../zoho.js";
@@ -53,8 +54,12 @@ router.post("/:id/draft", async (req, res) => {
     if (!ticket) return res.status(400).json({ error: "Missing ticket payload" });
     const conversation = await getConversation(req.params.id);
     // retrieve only the KB articles relevant to this ticket (semantic + fallback)
-    const kb = await retrieveRelevant({ ticket, conversation }, 8);
-    const result = await generateDraft({ ticket, conversation, kb });
+    // and pull the customer's attached photos so the AI can look at them too
+    const [kb, images] = await Promise.all([
+      retrieveRelevant({ ticket, conversation }, 8),
+      fetchConversationImages(req.params.id, conversation),
+    ]);
+    const result = await generateDraft({ ticket, conversation, kb, images });
     res.json({
       ...result, // draft, needsHuman, intent, confidence, kbCovered, sensitive, lane, label
       conversation,
