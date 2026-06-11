@@ -912,10 +912,20 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
 function EmailHtml({ html }) {
   const [showQuoted, setShowQuoted] = useState(false);
   const hasQuoted = /<blockquote|gmail_quote|zmail_extra/i.test(html);
+  // click any image in the email → open it full-size in a new tab
+  const onClick = (e) => {
+    const t = e.target;
+    if (t?.tagName === "IMG" && t.src) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(t.src, "_blank", "noopener");
+    }
+  };
   return (
     <>
       <div
         className={`email-html ${hasQuoted && !showQuoted ? "hide-quotes" : ""}`}
+        onClick={onClick}
         dangerouslySetInnerHTML={{ __html: html }}
       />
       {hasQuoted && (

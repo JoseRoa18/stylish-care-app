@@ -188,3 +188,4 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .email-html.hide-quotes .zmail_extra { display: none; }
 .quote-toggle { margin-top: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 11px; color: var(--ink-faint); cursor: pointer; }
 .quote-toggle:hover { background: var(--line-soft); }
+.email-html img { cursor: zoom-in; }
