@@ -192,6 +192,8 @@ export default function Inbox() {
         ))
       )}
 
+      <Lightbox />
+
       {/* ── pagination ─────────────────────────────────────── */}
       {total > pageSize && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, margin: "18px 0 4px" }}>
@@ -907,18 +909,45 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   );
 }
 
+// In-app image viewer: click any email/attachment image → enlarges right here
+// over a dark backdrop (click outside, ✕ or Esc to close). One instance lives
+// at the Inbox root; openLightbox() is callable from anywhere in this module.
+let _setLightboxUrl = null;
+const openLightbox = (url) => _setLightboxUrl?.(url);
+
+function Lightbox() {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    _setLightboxUrl = setUrl;
+    return () => { _setLightboxUrl = null; };
+  }, []);
+  useEffect(() => {
+    if (!url) return;
+    const onKey = (e) => e.key === "Escape" && setUrl(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [url]);
+  if (!url) return null;
+  return (
+    <div className="lightbox" onClick={() => setUrl(null)}>
+      <img src={url} alt="" onClick={(e) => e.stopPropagation()} />
+      <button className="lightbox-close" title="Close (Esc)" onClick={() => setUrl(null)}>✕</button>
+    </div>
+  );
+}
+
 // Render a message's real (server-sanitized) email HTML, with the quoted
 // reply-chain collapsed behind a toggle so each bubble shows just the new part.
 function EmailHtml({ html }) {
   const [showQuoted, setShowQuoted] = useState(false);
   const hasQuoted = /<blockquote|gmail_quote|zmail_extra/i.test(html);
-  // click any image in the email → open it full-size in a new tab
+  // click any image in the email → enlarge it in-app
   const onClick = (e) => {
     const t = e.target;
     if (t?.tagName === "IMG" && t.src) {
       e.preventDefault();
       e.stopPropagation();
-      window.open(t.src, "_blank", "noopener");
+      openLightbox(t.src);
     }
   };
   return (
@@ -958,11 +987,16 @@ function AttachmentStrip({ ticketId, attachments }) {
         {attachments.map((a) => {
           const url = api.attachmentUrl(ticketId, a.id, a.name);
           return IMAGE_RE.test(a.name || "") ? (
-            <a key={a.id} href={url} target="_blank" rel="noreferrer" title={`${a.name} · ${fmtBytes(a.size)}`}>
+            <a
+              key={a.id}
+              href={url}
+              title={`${a.name} · ${fmtBytes(a.size)}`}
+              onClick={(e) => { e.preventDefault(); openLightbox(url); }}
+            >
               <img
                 src={url}
                 alt={a.name}
-                style={{ height: 86, maxWidth: 150, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block" }}
+                style={{ height: 86, maxWidth: 150, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", display: "block", cursor: "zoom-in" }}
               />
             </a>
           ) : (

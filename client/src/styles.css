@@ -189,3 +189,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .quote-toggle { margin-top: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 11px; color: var(--ink-faint); cursor: pointer; }
 .quote-toggle:hover { background: var(--line-soft); }
 .email-html img { cursor: zoom-in; }
+
+/* ── in-app image lightbox ───────────────────────────────── */
+.lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(22, 19, 14, 0.86); display: flex; align-items: center; justify-content: center; padding: 28px; cursor: zoom-out; }
+.lightbox img { max-width: 94vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 12px 48px rgba(0,0,0,.55); cursor: default; background: #fff; }
+.lightbox-close { position: fixed; top: 16px; right: 20px; width: 36px; height: 36px; border-radius: 999px; border: none; background: rgba(255,255,255,.92); color: #222; font-size: 16px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.lightbox-close:hover { background: #fff; }
