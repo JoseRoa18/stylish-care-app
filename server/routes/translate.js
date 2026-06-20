@@ -1,8 +1,19 @@
 // server/routes/translate.js
 import { Router } from "express";
-import { translateTexts } from "../translate.js";
+import { translateTexts, translateHtml } from "../translate.js";
 
 const router = Router();
+
+// POST /api/translate/html  { html, target } — translate a drafted reply,
+// keeping its HTML formatting.
+router.post("/html", async (req, res) => {
+  try {
+    const { html, target } = req.body;
+    res.json({ html: await translateHtml(html || "", target || "Spanish") });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // POST /api/translate  { texts: string[], target: "English" | "Spanish" }
 router.post("/", async (req, res) => {

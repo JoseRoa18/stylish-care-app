@@ -537,6 +537,38 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   const [sendError, setSendError] = useState(null);
   const [cc, setCc] = useState("");          // extra recipients (#4)
   const [composing, setComposing] = useState(false); // manual / new reply mode
+  const [improving, setImproving] = useState(false);
+  const [xDraft, setXDraft] = useState(false); // translating the draft
+
+  const improveCurrentDraft = async () => {
+    if (!draftHtml.replace(/<[^>]*>/g, "").trim()) return;
+    setImproving(true);
+    setSendError(null);
+    try {
+      const r = await api.improveDraft(ticket.id, draftHtml);
+      setDraftHtml(draftToHtml(r.reply));
+      setDocKey((k) => k + 1);
+    } catch (e) {
+      setSendError(`Improve failed: ${e.message}`);
+    } finally {
+      setImproving(false);
+    }
+  };
+
+  const translateCurrentDraft = async (target) => {
+    if (!target || !draftHtml.replace(/<[^>]*>/g, "").trim()) return;
+    setXDraft(true);
+    setSendError(null);
+    try {
+      const r = await api.translateDraft(draftHtml, target);
+      setDraftHtml(draftToHtml(r.html));
+      setDocKey((k) => k + 1);
+    } catch (e) {
+      setSendError(`Translate failed: ${e.message}`);
+    } finally {
+      setXDraft(false);
+    }
+  };
 
   // Reset the compose area for a fresh reply (used after a send + "write reply")
   const resetCompose = () => {
@@ -925,6 +957,28 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                 disabled={sent}
                 onChange={setDraftHtml}
               />
+              {/* AI helpers on the draft (improve / translate) */}
+              {!sent && (
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  <button className="btn sm" disabled={improving || xDraft} onClick={improveCurrentDraft} title="Polish tone & grammar without changing the facts">
+                    {improving ? <><span className="spin" /> Improving…</> : "✨ Improve with AI"}
+                  </button>
+                  <span style={{ fontSize: 12, color: "var(--ink-faint)", marginLeft: 4 }}>Translate to:</span>
+                  <select
+                    className="status-select"
+                    value=""
+                    disabled={improving || xDraft}
+                    onChange={(e) => { translateCurrentDraft(e.target.value); e.target.value = ""; }}
+                    title="Translate the draft"
+                  >
+                    <option value="" disabled>language…</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                    <option value="English">English</option>
+                  </select>
+                  {xDraft && <span className="spin" />}
+                </div>
+              )}
               {/* outgoing attachments (#6) */}
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                 <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPickFiles} />

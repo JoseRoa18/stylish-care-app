@@ -178,6 +178,50 @@ export function routeReply({ intent, confidence, kbCovered, sensitive }) {
   return { lane: "ready", label: "Ready — high confidence" };
 }
 
+// Polish an agent's hand-written (or edited) draft WITHOUT changing its meaning.
+// Uses the fast model — this is an editing task, not retrieval.
+const IMPROVE_MODEL = process.env.GEMINI_FLASH_MODEL || "gemini-2.5-flash";
+const IMPROVE_PROMPT = `You are an expert customer-care editor for Stylish International Inc. (kitchen & bath; brands STYLISH and Sinks Direct).
+Improve the agent's DRAFT reply below. Make it warm, professional, clear and well-structured — like an experienced support specialist wrote it.
+
+STRICT RULES — do NOT change the substance:
+- Keep every fact, commitment, name, number, amount, date, link and policy EXACTLY as written. Never add new facts, promises, prices, timelines, links or claims.
+- Fix grammar, spelling, tone and flow only. Don't pad with filler or boilerplate.
+- Reply in the SAME language the draft is written in.
+- Format as clean HTML: short <p> paragraphs, <strong> for the few key details, <ul>/<ol> for steps. Allowed tags: <p>, <strong>, <em>, <ul>, <ol>, <li>, <a>, <br>. No subject line, no commentary.
+Output ONLY the improved reply HTML.`;
+
+export async function improveDraft({ draft }) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set in .env");
+  const src = String(draft || "").trim();
+  if (!src) throw new Error("Nothing to improve — the draft is empty.");
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMPROVE_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: IMPROVE_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: `DRAFT:\n${src}` }] }],
+        generationConfig: {
+          maxOutputTokens: 2048,
+          temperature: 0.3,
+          thinkingConfig: thinkingConfigFor(IMPROVE_MODEL),
+        },
+      }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Gemini improve error (${res.status}): ${data?.error?.message || "unknown"}`);
+  let out = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+  out = out.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
+  // keep only links that were already in the agent's draft (don't strip theirs,
+  // don't let the editor invent new ones)
+  const allowed = (src.match(/https?:\/\/[^\s"'<>)\]]+/gi) || []);
+  const { reply } = sanitizeReplyLinks(out, [], [{ text: allowed.join(" ") }]);
+  return { reply: reply.trim() || src };
+}
+
 export async function generateDraft({ ticket, conversation, kb, images = [] }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");

@@ -33,6 +33,37 @@ function salvageArray(text) {
   return null;
 }
 
+// Translate the VISIBLE text of an HTML email into `target`, keeping the tags
+// and structure intact. Used to translate a drafted reply before sending.
+export async function translateHtml(html, target = "Spanish") {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set in .env");
+  const src = String(html || "");
+  if (!src.trim()) return "";
+  const prompt = `Translate the visible text of this HTML email into ${target}.
+Rules:
+- Keep ALL HTML tags, structure and attributes EXACTLY; translate only the human-readable text between tags.
+- Preserve URLs, email addresses, product/model numbers, names and promo codes verbatim.
+- Output ONLY the translated HTML — no explanations, no markdown code fences.
+
+${src.slice(0, 9000)}`;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 4096, temperature: 0.2, thinkingConfig: thinkingFor(MODEL) },
+      }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Gemini translate error (${res.status}): ${data?.error?.message || "unknown"}`);
+  const out = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+  // strip a stray ```html ... ``` fence if the model added one
+  return out.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim() || src;
+}
+
 export async function translateTexts(texts, target = "English") {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set in .env");
   const full = (texts || []).map((t) => String(t ?? ""));

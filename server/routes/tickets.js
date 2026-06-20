@@ -17,7 +17,7 @@ import {
   mergeTickets,
   zohoConfigured,
 } from "../zoho.js";
-import { generateDraft } from "../gemini.js";
+import { generateDraft, improveDraft } from "../gemini.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
@@ -65,6 +65,17 @@ router.post("/:id/draft", async (req, res) => {
       conversation,
       usedKb: kb.map((a) => ({ id: a.id, title: a.title, source: a.source, score: a._score })),
     });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/tickets/:id/improve  { draft } — polish a hand-written reply.
+router.post("/:id/improve", async (req, res) => {
+  try {
+    const { draft } = req.body;
+    if (!draft?.trim()) return res.status(400).json({ error: "Empty draft" });
+    res.json(await improveDraft({ draft }));
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
