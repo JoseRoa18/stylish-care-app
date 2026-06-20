@@ -403,7 +403,7 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
 // Send a reply directly to the customer (not a draft). `contentType` is
 // "html" by default so rich-text (bold/italic/lists) is preserved. Pass
 // `attachmentIds` (from uploadTicketAttachment) to attach files.
-export async function sendReply(ticketId, { to, content, contentType = "html", attachmentIds }) {
+export async function sendReply(ticketId, { to, cc, content, contentType = "html", attachmentIds }) {
   if (!to) throw new Error("Missing customer email address for reply.");
   const body = {
     channel: "EMAIL",
@@ -412,6 +412,7 @@ export async function sendReply(ticketId, { to, content, contentType = "html", a
     content,
     contentType,
   };
+  if (cc && String(cc).trim()) body.cc = String(cc).trim();
   if (Array.isArray(attachmentIds) && attachmentIds.length) {
     body.attachmentIds = attachmentIds.map(String);
   }

@@ -306,12 +306,39 @@ function RichEditor({ docKey, initialHtml, disabled, onChange }) {
     </button>
   );
 
+  // Pasting plain text that contains a URL → auto-convert it to a hyperlink.
+  const onPaste = (e) => {
+    const html = e.clipboardData?.getData("text/html");
+    const text = e.clipboardData?.getData("text/plain");
+    if (html || !text || !/https?:\/\/\S/.test(text)) return; // let rich paste through
+    e.preventDefault();
+    const safe = text
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>')
+      .replace(/\n/g, "<br>");
+    document.execCommand("insertHTML", false, safe);
+    onChange?.(ref.current?.innerHTML || "");
+  };
+
   return (
     <div className="rich">
       <div className="rich-toolbar">
         {btn(<b>B</b>, "bold", "Bold")}
         {btn(<i>I</i>, "italic", "Italic")}
         {btn(<u>U</u>, "underline", "Underline")}
+        <select
+          title="Font size"
+          defaultValue=""
+          onMouseDown={(e) => e.preventDefault()}
+          onChange={(e) => { if (e.target.value) exec("fontSize", e.target.value); e.target.value = ""; }}
+          style={{ fontSize: 12, border: "1px solid var(--line)", borderRadius: 6, background: "var(--card)", color: "var(--ink)", cursor: "pointer", padding: "3px 4px" }}
+        >
+          <option value="" disabled>Size</option>
+          <option value="2">Small</option>
+          <option value="3">Normal</option>
+          <option value="5">Large</option>
+          <option value="6">Huge</option>
+        </select>
         {btn("• List", "insertUnorderedList", "Bullet list")}
         {btn("1. List", "insertOrderedList", "Numbered list")}
         <button
@@ -332,6 +359,7 @@ function RichEditor({ docKey, initialHtml, disabled, onChange }) {
         ref={ref}
         contentEditable={!disabled}
         suppressContentEditableWarning
+        onPaste={onPaste}
         onInput={() => onChange?.(ref.current?.innerHTML || "")}
       />
     </div>
@@ -507,6 +535,21 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState(null);
+  const [cc, setCc] = useState("");          // extra recipients (#4)
+  const [composing, setComposing] = useState(false); // manual / new reply mode
+
+  // Reset the compose area for a fresh reply (used after a send + "write reply")
+  const resetCompose = () => {
+    setSent(false);
+    setDraftHtml("");
+    setDocKey((k) => k + 1);
+    setAiMeta(null);
+    setTriage(null);
+    setOutFiles([]);
+    setCc("");
+    setSendError(null);
+    setComposing(true);
+  };
 
   // ticket attachments (#7)
   const [attachments, setAttachments] = useState([]);
@@ -622,9 +665,14 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
               kbUsed: aiMeta.usedKb, ticketNumber: ticket.number,
             }
           : undefined,
-        outFiles.map((f) => f.id)
+        outFiles.map((f) => f.id),
+        cc.trim()
       );
       setSent(true);
+      setComposing(false);
+      // refresh the thread so the reply we just sent shows up immediately
+      setConvoLoaded(false);
+      loadConversation();
     } catch (e) {
       setSendError(e.message);
     } finally {
@@ -819,12 +867,15 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
             <div className="banner error" style={{ marginTop: 14 }}>Draft failed: {draftError}</div>
           )}
 
-          {!hasContent && !drafting && (
+          {!hasContent && !composing && !drafting && (
             <div className="draft-actions" style={{ marginTop: 14 }}>
               <button className="btn primary" onClick={generate} disabled={convoLoading}>
                 ✦ Generate reply with AI
               </button>
-              <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>Uses the approved Knowledge Base.</span>
+              <button className="btn" onClick={() => setComposing(true)} disabled={convoLoading}>
+                ✍️ Write reply
+              </button>
+              <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>AI uses the approved Knowledge Base.</span>
             </div>
           )}
 
@@ -834,7 +885,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
             </div>
           )}
 
-          {hasContent && (
+          {(hasContent || composing) && (
             <>
               {triage && <LaneBanner triage={triage} />}
               <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 8px" }}>
@@ -856,6 +907,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                     ↺
                   </button>
                 )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 8px" }}>
+                <label style={{ fontSize: 13, color: "var(--ink-soft)", flexShrink: 0 }}>Cc:</label>
+                <input
+                  type="text"
+                  value={cc}
+                  disabled={sent || sending}
+                  placeholder="comma-separated emails (optional)"
+                  onChange={(e) => setCc(e.target.value)}
+                  style={{ flex: "0 1 340px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+                />
               </div>
               <RichEditor
                 docKey={docKey}
@@ -897,10 +959,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                     {sending ? <><span className="spin" /> Sending…</> : "Approve & Send to customer"}
                   </button>
                 )}
-                <button className="btn" onClick={generate} disabled={drafting || sending || sent}>
-                  {drafting ? "Regenerating…" : "↻ Regenerate"}
-                </button>
-                {sent && <span style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to {toEmail}</span>}
+                {!sent && (
+                  <button className="btn" onClick={generate} disabled={drafting || sending}>
+                    {drafting ? "Regenerating…" : "↻ Regenerate"}
+                  </button>
+                )}
+                {sent && (
+                  <>
+                    <span style={{ color: "var(--green)", fontSize: 13 }}>✓ Reply sent to {toEmail}</span>
+                    <button className="btn" onClick={resetCompose}>✍️ Write another reply</button>
+                  </>
+                )}
               </div>
             </>
           )}

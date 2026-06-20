@@ -36,10 +36,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ticket }),
     }),
-  send: (id, to, content, contentType = "html", feedback, attachmentIds) =>
+  send: (id, to, content, contentType = "html", feedback, attachmentIds, cc) =>
     req(`/tickets/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ to, content, contentType, feedback, attachmentIds }),
+      body: JSON.stringify({ to, cc, content, contentType, feedback, attachmentIds }),
     }),
   attachments: (id) => req(`/tickets/${id}/attachments`),
   attachmentUrl: (id, attId, name) =>

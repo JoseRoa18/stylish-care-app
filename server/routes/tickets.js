@@ -73,9 +73,9 @@ router.post("/:id/draft", async (req, res) => {
 // POST /api/tickets/:id/send  { to, content, contentType?, feedback? }
 router.post("/:id/send", async (req, res) => {
   try {
-    const { to, content, contentType, feedback, attachmentIds } = req.body;
+    const { to, cc, content, contentType, feedback, attachmentIds } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: "Empty reply" });
-    const result = await sendReply(req.params.id, { to, content, contentType, attachmentIds });
+    const result = await sendReply(req.params.id, { to, cc, content, contentType, attachmentIds });
     // Feedback loop: record how much the agent changed the AI draft. Best-effort
     // — a failure here must never affect the customer-facing send.
     if (feedback?.aiDraft) {
