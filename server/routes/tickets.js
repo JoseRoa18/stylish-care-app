@@ -8,6 +8,8 @@ import {
   updateTicketSubject,
   markTicketSpam,
   moveTicketToTrash,
+  listTicketComments,
+  addTicketComment,
   listTicketAttachments,
   downloadTicketAttachment,
   downloadThreadAttachment,
@@ -65,6 +67,25 @@ router.post("/:id/draft", async (req, res) => {
       conversation,
       usedKb: kb.map((a) => ({ id: a.id, title: a.title, source: a.source, score: a._score })),
     });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET/POST /api/tickets/:id/notes — private internal notes (Zoho comments).
+router.get("/:id/notes", async (req, res) => {
+  try {
+    res.json({ notes: await listTicketComments(req.params.id) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+router.post("/:id/notes", async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: "Empty note" });
+    await addTicketComment(req.params.id, content);
+    res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

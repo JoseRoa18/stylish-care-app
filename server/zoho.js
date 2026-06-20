@@ -422,6 +422,26 @@ export async function sendReply(ticketId, { to, cc, content, contentType = "html
   });
 }
 
+// ── private internal notes (Zoho comments, isPublic:false) ───
+export async function listTicketComments(ticketId) {
+  const data = await zohoFetch(`/tickets/${ticketId}/comments?limit=50`);
+  return (data?.data || []).map((c) => ({
+    id: c.id,
+    content: c.content || "",
+    isPublic: Boolean(c.isPublic),
+    author: c.commenter?.name || c.commentedBy || "",
+    createdTime: c.commentedTime || c.createdTime,
+  }));
+}
+
+export async function addTicketComment(ticketId, content) {
+  if (!content?.trim()) throw new Error("Empty note");
+  return zohoFetch(`/tickets/${ticketId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ content: content.trim(), isPublic: false, contentType: "plainText" }),
+  });
+}
+
 // ── ticket attachments (view + upload) ───────────────────────
 
 // All files attached to a ticket (Zoho aggregates them across the thread).

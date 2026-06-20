@@ -72,6 +72,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+  notes: (id) => req(`/tickets/${id}/notes`),
+  addNote: (id, content) =>
+    req(`/tickets/${id}/notes`, { method: "POST", body: JSON.stringify({ content }) }),
   markSpam: (id) => req(`/tickets/${id}/spam`, { method: "POST" }),
   trash: (id) => req(`/tickets/${id}/trash`, { method: "POST" }),
   setSubject: (id, subject) =>

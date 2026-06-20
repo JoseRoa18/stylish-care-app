@@ -586,11 +586,51 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   // ticket attachments (#7)
   const [attachments, setAttachments] = useState([]);
 
+  // private internal notes
+  const [notes, setNotes] = useState([]);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const addNote = async () => {
+    if (!noteText.trim()) return;
+    setSavingNote(true);
+    try {
+      await api.addNote(ticket.id, noteText);
+      setNoteText("");
+      const r = await api.notes(ticket.id);
+      setNotes(r.notes || []);
+    } catch (e) {
+      alert(`Could not save note: ${e.message}`);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  // forward the customer's message to a colleague/supplier (reuses send)
+  const forward = () => {
+    const last = [...(conversation || [])].reverse().find((m) => m.direction !== "out");
+    const orig = last?.html
+      ? last.html
+      : last?.text
+      ? `<p>${escapeHtml(last.text).replace(/\n/g, "<br>")}</p>`
+      : "";
+    const header = `<p>---------- Forwarded message ----------<br>From: ${escapeHtml(ticket.customerName)} &lt;${escapeHtml(ticket.customerEmail || "")}&gt;<br>Subject: ${escapeHtml(subj)}</p>`;
+    setComposing(true);
+    setSent(false);
+    setToEmail("");
+    setCc("");
+    setAiMeta(null);
+    setTriage(null);
+    setDraftHtml(`<p></p>${header}<blockquote>${orig}</blockquote>`);
+    setDocKey((k) => k + 1);
+  };
+
   const loadConversation = useCallback(async () => {
     setConvoLoading(true);
     setConvoError(null);
-    // fetch the file list in parallel — non-blocking, best-effort
+    // fetch the file list + notes in parallel — non-blocking, best-effort
     api.attachments(ticket.id).then((r) => setAttachments(r.attachments || [])).catch(() => {});
+    api.notes(ticket.id).then((r) => setNotes(r.notes || [])).catch(() => {});
     try {
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
@@ -854,6 +894,42 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
 
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
 
+          {/* ── private internal notes ───────────────────────── */}
+          <div style={{ marginTop: 10 }}>
+            <button className="btn sm" onClick={() => setNotesOpen((v) => !v)}>
+              🗒 Private notes{notes.length ? ` (${notes.length})` : ""}{notesOpen ? " ▲" : ""}
+            </button>
+            {notesOpen && (
+              <div className="card" style={{ marginTop: 8, padding: 12 }}>
+                {notes.length === 0 && (
+                  <div style={{ fontSize: 13, color: "var(--ink-faint)", marginBottom: 8 }}>
+                    No internal notes yet. These are private — the customer never sees them.
+                  </div>
+                )}
+                {notes.map((n) => (
+                  <div key={n.id} style={{ borderLeft: "3px solid var(--amber)", paddingLeft: 10, margin: "8px 0", fontSize: 13 }}>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{n.content.replace(/<[^>]+>/g, "")}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
+                      {n.author || "Agent"} · {fmtTime(n.createdTime)}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <textarea
+                    rows={2}
+                    value={noteText}
+                    placeholder="Add a private note (internal only)…"
+                    onChange={(e) => setNoteText(e.target.value)}
+                    style={{ flex: 1, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
+                  />
+                  <button className="btn sm primary" disabled={savingNote || !noteText.trim()} onClick={addNote}>
+                    {savingNote ? "Saving…" : "Add note"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* ── merge with same-customer tickets (#10) ───────── */}
           <div style={{ marginTop: 10 }}>
             <button className="btn sm" onClick={openMerge}>
@@ -906,6 +982,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
               </button>
               <button className="btn" onClick={() => setComposing(true)} disabled={convoLoading}>
                 ✍️ Write reply
+              </button>
+              <button className="btn" onClick={forward} disabled={convoLoading} title="Forward this email to a colleague or supplier">
+                ↪ Forward
               </button>
               <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>AI uses the approved Knowledge Base.</span>
             </div>
