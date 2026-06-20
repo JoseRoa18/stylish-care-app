@@ -21,7 +21,7 @@ const SORT_OPTIONS = [
   { key: "waiting", label: "Longest waiting" },
 ];
 
-export default function Inbox() {
+export default function Inbox({ signature = "" }) {
   const [tickets, setTickets] = useState([]);
   const [counts, setCounts] = useState({ all: 0, active: 0, closed: 0, byStatus: {} });
   const [total, setTotal] = useState(0);
@@ -185,6 +185,7 @@ export default function Inbox() {
             key={t.id}
             ticket={t}
             statusOptions={statusOptions}
+            signature={signature}
             open={openId === t.id}
             onToggle={() => setOpenId(openId === t.id ? null : t.id)}
             onChanged={load}
@@ -409,7 +410,7 @@ function StatusSelect({ status, options = [], onChange, saving }) {
   );
 }
 
-function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
+function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "" }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
@@ -1122,6 +1123,18 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                     {improving ? <><span className="spin" /> Improving…</> : "✨ Improve with AI"}
                   </button>
                   <button className="btn sm" onClick={toggleTemplates}>📋 Templates</button>
+                  {signature && (
+                    <button
+                      className="btn sm"
+                      title="Insert your signature"
+                      onClick={() => {
+                        setDraftHtml((prev) => (prev && prev.replace(/<[^>]*>/g, "").trim() ? prev + "<br>" : "") + signature);
+                        setDocKey((k) => k + 1);
+                      }}
+                    >
+                      ✍️ Signature
+                    </button>
+                  )}
                   <span style={{ fontSize: 12, color: "var(--ink-faint)", marginLeft: 4 }}>Translate to:</span>
                   <select
                     className="status-select"

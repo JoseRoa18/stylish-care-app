@@ -15,6 +15,23 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [health, setHealth] = useState({ zoho: false, dropbox: false, gemini: false });
   const [auth, setAuth] = useState({ checked: false, authed: false, enabled: true });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [signature, setSignature] = useState("");
+
+  useEffect(() => {
+    if (!auth.authed) return;
+    api.getSettings().then((s) => setSignature(s.signature || "")).catch(() => {});
+  }, [auth.authed]);
+
+  const saveSignature = async (val) => {
+    try {
+      const s = await api.saveSettings({ signature: val });
+      setSignature(s.signature || "");
+      setSettingsOpen(false);
+    } catch (e) {
+      alert(`Could not save: ${e.message}`);
+    }
+  };
 
   // check the session once on load, and drop to login if it expires mid-use
   useEffect(() => {
@@ -88,8 +105,11 @@ export default function App() {
           <span>
             <i className="status-dot" style={dot(health.dropbox)} /> Dropbox
           </span>
+          <button className="btn sm" onClick={() => setSettingsOpen(true)} title="Settings (signature)" style={{ marginLeft: 4 }}>
+            ⚙
+          </button>
           {auth.enabled && (
-            <button className="btn sm" onClick={logout} title="Sign out" style={{ marginLeft: 4 }}>
+            <button className="btn sm" onClick={logout} title="Sign out">
               Sign out
             </button>
           )}
@@ -97,8 +117,44 @@ export default function App() {
       </div>
 
       {tab === "dashboard" && <Dashboard onOpenInbox={() => setTab("inbox")} />}
-      {tab === "inbox" && <Inbox />}
+      {tab === "inbox" && <Inbox signature={signature} />}
       {tab === "kb" && <KnowledgeBase />}
+
+      {settingsOpen && (
+        <SignatureModal
+          initial={signature}
+          onClose={() => setSettingsOpen(false)}
+          onSave={saveSignature}
+        />
+      )}
+    </div>
+  );
+}
+
+// Edit the outgoing reply signature (HTML). Appended to every reply.
+function SignatureModal({ initial, onClose, onSave }) {
+  const [val, setVal] = useState(initial || "");
+  return (
+    <div className="lightbox" onClick={onClose} style={{ alignItems: "flex-start", paddingTop: "8vh" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, padding: 22, cursor: "default" }}>
+        <h3 style={{ margin: "0 0 4px" }}>Reply signature</h3>
+        <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 0 12px" }}>
+          HTML appended to the end of every reply (AI drafts include it automatically). Use the team's
+          Zoho block here — name, company, phone, links.
+        </p>
+        <textarea
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          rows={7}
+          style={{ width: "100%", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box", resize: "vertical" }}
+        />
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--ink-faint)" }}>Preview:</div>
+        <div className="email-html" style={{ border: "1px solid var(--line-soft)", borderRadius: 8, padding: 10, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: val }} />
+        <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={() => onSave(val)}>Save signature</button>
+        </div>
+      </div>
     </div>
   );
 }

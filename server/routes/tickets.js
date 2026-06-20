@@ -20,6 +20,7 @@ import {
   zohoConfigured,
 } from "../zoho.js";
 import { generateDraft, improveDraft } from "../gemini.js";
+import { getSettings, saveSettings, appendSignature } from "../settings.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
@@ -62,11 +63,34 @@ router.post("/:id/draft", async (req, res) => {
       fetchConversationImages(req.params.id, conversation),
     ]);
     const result = await generateDraft({ ticket, conversation, kb, images });
+    // append the official signature so every AI draft ends consistently
+    try {
+      const { signature } = await getSettings();
+      result.draft = appendSignature(result.draft, signature);
+    } catch { /* signature optional */ }
     res.json({
       ...result, // draft, needsHuman, intent, confidence, kbCovered, sensitive, lane, label
       conversation,
       usedKb: kb.map((a) => ({ id: a.id, title: a.title, source: a.source, score: a._score })),
     });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET/PUT /api/tickets/settings — app settings (currently the signature).
+router.get("/settings", async (_req, res) => {
+  try {
+    res.json(await getSettings());
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+router.put("/settings", async (req, res) => {
+  try {
+    const patch = {};
+    if (typeof req.body.signature === "string") patch.signature = req.body.signature;
+    res.json(await saveSettings(patch));
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
