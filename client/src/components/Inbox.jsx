@@ -540,6 +540,25 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   const [improving, setImproving] = useState(false);
   const [xDraft, setXDraft] = useState(false); // translating the draft
 
+  // reply templates panel
+  const [templates, setTemplates] = useState(null);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplSearch, setTplSearch] = useState("");
+  const toggleTemplates = async () => {
+    setTplOpen((v) => !v);
+    if (!templates) {
+      try { const r = await api.templates(); setTemplates(r.templates || []); }
+      catch { setTemplates([]); }
+    }
+  };
+  const insertTemplate = (tpl) => {
+    const html = plainToHtml(tpl.body || "");
+    setDraftHtml((prev) => (prev && prev.replace(/<[^>]*>/g, "").trim() ? prev + "<br>" : "") + html);
+    setDocKey((k) => k + 1);
+    setComposing(true);
+    setTplOpen(false);
+  };
+
   const improveCurrentDraft = async () => {
     if (!draftHtml.replace(/<[^>]*>/g, "").trim()) return;
     setImproving(true);
@@ -986,7 +1005,45 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
               <button className="btn" onClick={forward} disabled={convoLoading} title="Forward this email to a colleague or supplier">
                 ↪ Forward
               </button>
+              <button className="btn" onClick={toggleTemplates} disabled={convoLoading}>
+                📋 Templates
+              </button>
               <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>AI uses the approved Knowledge Base.</span>
+            </div>
+          )}
+
+          {tplOpen && (
+            <div className="card" style={{ marginTop: 10, padding: 12 }}>
+              <input
+                className="field"
+                placeholder="Search templates…"
+                value={tplSearch}
+                onChange={(e) => setTplSearch(e.target.value)}
+                style={{ width: "100%", padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", marginBottom: 8, boxSizing: "border-box" }}
+              />
+              {!templates ? (
+                <span style={{ fontSize: 13, color: "var(--ink-faint)" }}><span className="spin" /> Loading…</span>
+              ) : (
+                <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                  {templates
+                    .filter((t) => !tplSearch || `${t.title} ${t.body}`.toLowerCase().includes(tplSearch.toLowerCase()))
+                    .map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => insertTemplate(t)}
+                        title="Click to insert into the reply"
+                        style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", borderBottom: "1px solid var(--line-soft)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--line-soft)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{t.title}</div>
+                        <div style={{ fontSize: 12, color: "var(--ink-faint)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {(t.body || "").replace(/\s+/g, " ").slice(0, 120)}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1042,6 +1099,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                   <button className="btn sm" disabled={improving || xDraft} onClick={improveCurrentDraft} title="Polish tone & grammar without changing the facts">
                     {improving ? <><span className="spin" /> Improving…</> : "✨ Improve with AI"}
                   </button>
+                  <button className="btn sm" onClick={toggleTemplates}>📋 Templates</button>
                   <span style={{ fontSize: 12, color: "var(--ink-faint)", marginLeft: 4 }}>Translate to:</span>
                   <select
                     className="status-select"
@@ -1177,6 +1235,36 @@ function fmtBytes(n) {
 }
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const VIDEO_RE = /\.(mp4|mov|webm|m4v|ogg)$/i;
+
+// One attachment → image thumb / inline video player / file chip, each with a
+// download button.
+function Attachment({ url, name, size, thumbHeight = 74 }) {
+  const dl = (
+    <a href={url} download={name} title="Download" style={{ textDecoration: "none", color: "var(--ink-faint)", fontSize: 13, padding: "0 2px" }}>⬇</a>
+  );
+  if (VIDEO_RE.test(name || ""))
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+        <video controls src={url} style={{ maxWidth: 260, maxHeight: 180, borderRadius: 8, border: "1px solid var(--line)", background: "#000" }} />
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>🎬 {name} · {fmtBytes(size)} {dl}</span>
+      </span>
+    );
+  if (IMAGE_RE.test(name || ""))
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+        <Thumb url={url} name={name} size={size} height={thumbHeight} />
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{dl} download</span>
+      </span>
+    );
+  return (
+    <span style={fileChipStyle}>
+      <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "var(--ink)" }}>📄 {name}</a>
+      <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
+      {dl}
+    </span>
+  );
+}
 
 const fileChipStyle = {
   display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px",
@@ -1228,16 +1316,9 @@ function AttachmentStrip({ ticketId, attachments }) {
         📎 Attachments ({attachments.length})
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {attachments.map((a) => {
-          const url = api.attachmentUrl(ticketId, a.id, a.name);
-          return IMAGE_RE.test(a.name || "") ? (
-            <Thumb key={a.id} url={url} name={a.name} size={a.size} height={86} />
-          ) : (
-            <a key={a.id} href={url} target="_blank" rel="noreferrer" style={{ ...fileChipStyle, fontSize: 13 }}>
-              📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
-            </a>
-          );
-        })}
+        {attachments.map((a) => (
+          <Attachment key={a.id} url={api.attachmentUrl(ticketId, a.id, a.name)} name={a.name} size={a.size} thumbHeight={86} />
+        ))}
       </div>
     </div>
   );
@@ -1248,16 +1329,9 @@ function MessageAttachments({ ticketId, threadId, attachments }) {
   if (!attachments?.length) return null;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-      {attachments.map((a) => {
-        const url = api.threadAttachmentUrl(ticketId, threadId, a.id, a.name);
-        return IMAGE_RE.test(a.name || "") ? (
-          <Thumb key={a.id} url={url} name={a.name} size={a.size} />
-        ) : (
-          <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>
-            📄 {a.name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(a.size)}</span>
-          </a>
-        );
-      })}
+      {attachments.map((a) => (
+        <Attachment key={a.id} url={api.threadAttachmentUrl(ticketId, threadId, a.id, a.name)} name={a.name} size={a.size} />
+      ))}
     </div>
   );
 }

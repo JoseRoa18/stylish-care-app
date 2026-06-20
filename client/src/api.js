@@ -63,6 +63,7 @@ export const api = {
   merge: (id, ids) =>
     req(`/tickets/${id}/merge`, { method: "POST", body: JSON.stringify({ ids }) }),
   feedbackMetrics: (days = 90) => req(`/feedback/metrics?days=${days}`),
+  templates: () => req(`/templates`),
   improveDraft: (id, draft) =>
     req(`/tickets/${id}/improve`, { method: "POST", body: JSON.stringify({ draft }) }),
   translateDraft: (html, target) =>

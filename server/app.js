@@ -188,6 +188,22 @@ export function createApp() {
     }
   });
 
+  // Reply templates (the team's Zoho templates, already in the KB) — for the
+  // copy/paste panel in the inbox.
+  app.get("/api/templates", async (_req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from("kb_articles")
+        .select("id,title,body")
+        .eq("source", "zoho-template")
+        .order("title");
+      if (error) throw new Error(error.message);
+      res.json({ templates: data || [] });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   app.get("/api/feedback/metrics", async (req, res) => {
     try {
       const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
