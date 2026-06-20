@@ -85,6 +85,14 @@ export default function Dashboard({ onOpenInbox }) {
         <ColumnChart data={data.perDay || []} />
       </div>
 
+      {/* ── weekly resolution ────────────────────────────── */}
+      {data.resolutionByWeek?.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="chart-title">Avg resolution · by week (last 8 weeks)</div>
+          <WeeklyResolution data={data.resolutionByWeek} />
+        </div>
+      )}
+
       {/* ── AI reply quality (feedback loop) ─────────────── */}
       <div className="card" style={{ marginTop: 16 }}>
         <div className="chart-title">AI reply quality · last 90 days</div>
@@ -198,6 +206,34 @@ function BarChart({ data, colors, onPick }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// Weekly average resolution time — bars scaled to days, labelled with the value.
+function WeeklyResolution({ data }) {
+  const days = (ms) => (ms == null ? null : ms / 86400000);
+  const max = Math.max(1, ...data.map((d) => days(d.avgMs) || 0));
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 110, marginTop: 8 }}>
+        {data.map((d, i) => {
+          const dv = days(d.avgMs);
+          return (
+            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center" }} title={d.count ? `${d.count} tickets closed` : "no tickets closed"}>
+              {dv != null && <span style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 3 }}>{dv < 1 ? `${Math.round(dv * 24)}h` : `${dv.toFixed(1)}d`}</span>}
+              <div style={{ width: "60%", maxWidth: 44, background: dv == null ? "var(--line-soft)" : "var(--brass)", borderRadius: "4px 4px 0 0", height: `${dv == null ? 2 : Math.max((dv / max) * 84, 3)}px` }} />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        {data.map((d, i) => (
+          <span key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "var(--ink-faint)" }}>
+            {d.label}<br /><span style={{ opacity: 0.7 }}>{d.count || 0}</span>
+          </span>
+        ))}
+      </div>
+    </>
   );
 }
 

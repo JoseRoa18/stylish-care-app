@@ -458,10 +458,10 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
   // files to attach on the outgoing reply (#6)
   const [outFiles, setOutFiles] = useState([]); // [{id,name,size}]
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
-  const onPickFiles = async (e) => {
-    const files = [...(e.target.files || [])];
-    e.target.value = ""; // allow re-picking the same file
+  const uploadFiles = async (fileList) => {
+    const files = [...(fileList || [])];
     if (!files.length) return;
     setUploading(true);
     setSendError(null);
@@ -474,6 +474,16 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
       }
     }
     setUploading(false);
+  };
+  const onPickFiles = (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = ""; // allow re-picking the same file
+    uploadFiles(files);
+  };
+  const onDropFiles = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer?.files?.length) uploadFiles(e.dataTransfer.files);
   };
 
   // merge with other tickets from the same customer (#10)
@@ -1087,12 +1097,24 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged }) {
                   style={{ flex: "0 1 340px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
                 />
               </div>
-              <RichEditor
-                docKey={docKey}
-                initialHtml={draftHtml}
-                disabled={sent}
-                onChange={setDraftHtml}
-              />
+              <div
+                onDragOver={(e) => { if (!sent) { e.preventDefault(); setDragOver(true); } }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={sent ? undefined : onDropFiles}
+                style={{ position: "relative", outline: dragOver ? "2px dashed var(--brass)" : "none", outlineOffset: 2, borderRadius: 10 }}
+              >
+                <RichEditor
+                  docKey={docKey}
+                  initialHtml={draftHtml}
+                  disabled={sent}
+                  onChange={setDraftHtml}
+                />
+                {dragOver && (
+                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(154,107,47,0.08)", borderRadius: 10, pointerEvents: "none", fontSize: 14, color: "var(--brass)", fontWeight: 600 }}>
+                    Drop files to attach
+                  </div>
+                )}
+              </div>
               {/* AI helpers on the draft (improve / translate) */}
               {!sent && (
                 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>

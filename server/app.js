@@ -29,6 +29,38 @@ import {
   clearSessionCookie,
 } from "./auth.js";
 
+// Monday (UTC) of the week containing `d`.
+function weekStartUTC(d) {
+  const dt = new Date(d);
+  const dow = (dt.getUTCDay() + 6) % 7;
+  dt.setUTCDate(dt.getUTCDate() - dow);
+  dt.setUTCHours(0, 0, 0, 0);
+  return dt;
+}
+
+// Average resolution time bucketed by the week a ticket was CLOSED, last N weeks.
+function weeklyResolution(rows, weeks) {
+  const now = Date.now();
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const ws = weekStartUTC(new Date(now - i * 7 * 86400000));
+    buckets.push({ start: ws, key: ws.toISOString().slice(0, 10), sum: 0, n: 0 });
+  }
+  const byKey = new Map(buckets.map((b) => [b.key, b]));
+  for (const r of rows) {
+    if (!r.closed_time || !r.created_time) continue;
+    const b = byKey.get(weekStartUTC(r.closed_time).toISOString().slice(0, 10));
+    if (!b) continue;
+    const ms = new Date(r.closed_time) - new Date(r.created_time);
+    if (ms >= 0) { b.sum += ms; b.n += 1; }
+  }
+  return buckets.map((b) => ({
+    label: b.start.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    avgMs: b.n ? Math.round(b.sum / b.n) : null,
+    count: b.n,
+  }));
+}
+
 export function createApp() {
   const app = express();
   app.use(cors());
@@ -164,6 +196,17 @@ export function createApp() {
         count: Number(r.count),
       }));
 
+      // weekly avg resolution (last 8 weeks) — computed in JS, no migration
+      const weeksBack = 8;
+      const since = new Date(Date.now() - weeksBack * 7 * 86400000).toISOString();
+      const { data: resRows } = await supabase
+        .from("tickets")
+        .select("created_time,closed_time")
+        .ilike("status", "%closed%")
+        .gte("closed_time", since)
+        .not("closed_time", "is", null);
+      const resolutionByWeek = weeklyResolution(resRows || [], weeksBack);
+
       res.json({
         zoho: zohoConfigured(),
         dropbox: dropboxConfigured(),
@@ -180,6 +223,7 @@ export function createApp() {
         avgResolutionMs: round(m.avgResolutionMs),
         resolvedSample: m.resolvedSample || 0,
         perDay,
+        resolutionByWeek,
         lastFetch: new Date().toISOString(),
         error: null,
       });
