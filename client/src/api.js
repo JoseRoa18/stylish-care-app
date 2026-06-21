@@ -66,6 +66,7 @@ export const api = {
   templates: () => req(`/templates`),
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
+  shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
   getSettings: () => req(`/tickets/settings`),
   saveSettings: (patch) => req(`/tickets/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   improveDraft: (id, draft) =>

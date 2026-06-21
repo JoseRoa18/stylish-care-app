@@ -616,6 +616,19 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // ticket attachments (#7)
   const [attachments, setAttachments] = useState([]);
 
+  // ShipStation: shipment lookup by order number (any channel)
+  const [shipResults, setShipResults] = useState(null);
+  const [shipQ, setShipQ] = useState("");
+  const [shipLoading, setShipLoading] = useState(false);
+  const searchShipment = async (num) => {
+    const n = String(num ?? shipQ).trim();
+    if (!n) return;
+    setShipLoading(true);
+    try { const r = await api.shipOrder(n); setShipResults(r.orders || []); }
+    catch { setShipResults([]); }
+    finally { setShipLoading(false); }
+  };
+
   // Wix store: customer orders + product lookup
   const [orders, setOrders] = useState(null);
   const [prodQ, setProdQ] = useState("");
@@ -681,6 +694,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
       setConvoLoaded(true);
+      // auto-look up any order numbers mentioned in the ticket (ShipStation)
+      const text = `${ticket.subject || ""} ${(res.conversation || []).filter((m) => m.direction !== "out").map((m) => m.text || "").join(" ")}`;
+      const nums = extractOrderNums(text);
+      if (nums.length) {
+        Promise.all(nums.slice(0, 2).map((n) => api.shipOrder(n).then((r) => r.orders || []).catch(() => [])))
+          .then((arr) => { const flat = arr.flat(); if (flat.length) setShipResults(flat); });
+      }
     } catch (e) {
       setConvoError(e.message);
     } finally {
@@ -947,6 +967,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           )}
           <ProductLookup
             q={prodQ} setQ={setProdQ} results={prodResults} loading={prodLoading} onSearch={lookupProducts}
+          />
+
+          {/* ── ShipStation: shipments by order number (any channel) ── */}
+          <ShipmentLookup
+            q={shipQ} setQ={setShipQ} results={shipResults} loading={shipLoading} onSearch={() => searchShipment()}
           />
 
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
@@ -1429,6 +1454,73 @@ function OrderCard({ order }) {
           {t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.number}</a> : <span className="mono">{t.number}</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+// order numbers mentioned in a ticket (mirror of the server-side extractor)
+function extractOrderNums(text) {
+  const t = String(text || "");
+  const s = new Set();
+  for (const m of t.matchAll(/\b\d{3}-\d{7}-\d{7}\b/g)) s.add(m[0]);
+  for (const m of t.matchAll(/\b(?:CS|CA|PO)[#\s]?\d{6,}\b/gi)) s.add(m[0].replace(/[#\s]/g, ""));
+  for (const m of t.matchAll(/\b\d{5,9}\b/g)) s.add(m[0]);
+  return [...s].slice(0, 3);
+}
+
+const SHIP_STATUS_COLOR = { shipped: "#3b7a57", "partially shipped": "#c8912a", "awaiting shipment": "#c8912a", "on hold": "#c8912a", cancelled: "#c0392b", canceled: "#c0392b" };
+
+function ShipmentCard({ s }) {
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="mono" style={{ fontWeight: 700 }}>#{s.orderNumber}</span>
+        <Pill text={s.status} color={SHIP_STATUS_COLOR[s.status]} />
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{s.channel}{s.account ? ` · ${s.account}` : ""}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{s.date || ""}</span>
+      </div>
+      {s.items?.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>
+          {s.items.map((i) => `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ""}`).join(" · ")}
+        </div>
+      )}
+      {s.tracking.map((t, i) => (
+        <div key={i} style={{ fontSize: 12, marginTop: 4 }}>
+          📦 {t.carrier || "Tracking"}:{" "}
+          {t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.number}</a> : <span className="mono">{t.number}</span>}
+          {t.shipDate && <span style={{ color: "var(--ink-faint)" }}> · shipped {t.shipDate}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ShipmentLookup({ q, setQ, results, loading, onSearch }) {
+  return (
+    <div style={{ margin: "10px 0 4px" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>📦 ShipStation</span>
+        <input
+          className="field"
+          placeholder="Track by order # (Amazon, Wayfair, direct…)"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSearch()}
+          style={{ flex: "0 1 300px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+        />
+        <button className="btn sm" onClick={onSearch} disabled={loading || !q.trim()}>
+          {loading ? <span className="spin" /> : "Look up"}
+        </button>
+      </div>
+      {results && (
+        <div style={{ marginTop: 6 }}>
+          {results.length === 0 ? (
+            <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>No shipment found for that order number.</span>
+          ) : (
+            results.map((s, i) => <ShipmentCard key={i} s={s} />)
+          )}
+        </div>
+      )}
     </div>
   );
 }

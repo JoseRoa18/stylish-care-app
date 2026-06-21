@@ -21,6 +21,7 @@ import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 import { feedbackMetrics } from "./feedback.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
+import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import {
   authEnabled,
   checkPassword,
@@ -94,6 +95,7 @@ export function createApp() {
       dropbox: dropboxConfigured(),
       gemini: geminiConfigured(),
       wix: wixConfigured(),
+      shipstation: shipstationConfigured(),
     })
   );
 
@@ -245,6 +247,15 @@ export function createApp() {
   app.get("/api/wix/products", async (req, res) => {
     try {
       res.json({ products: await searchProducts(req.query.q || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ShipStation — look up a shipment/order by number (any channel).
+  app.get("/api/shipstation/order", async (req, res) => {
+    try {
+      res.json({ orders: await lookupOrder(req.query.number || "") });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
