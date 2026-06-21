@@ -37,10 +37,27 @@ export async function saveSettings(patch) {
 const normText = (s) =>
   String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 
+// Drop a trailing sign-off the model may still add, so it doesn't collide with
+// the signature's own closing (e.g. a stray "<p>Regards,</p>" before the block).
+const CLOSING = "regards|best regards|kind regards|warm regards|sincerely|cheers|best|thanks|thank you";
+function stripTrailingClosing(html) {
+  let s = String(html || "").trim();
+  // remove up to two trailing closing-only paragraphs / lines
+  for (let i = 0; i < 2; i++) {
+    const next = s.replace(
+      new RegExp(`(?:<p[^>]*>|<br\\s*/?>)?\\s*(?:${CLOSING})\\s*[,.!]?\\s*(?:</p>)?\\s*$`, "i"),
+      ""
+    ).trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
 export function appendSignature(html, signature) {
   const sig = (signature || "").trim();
   if (!sig) return html;
-  const body = String(html || "").trim();
+  const body = stripTrailingClosing(String(html || "").trim());
   const marker = normText(sig).slice(0, 40); // distinctive enough to avoid a stray "regards,"
   if (marker && normText(body).includes(marker)) return body;
   return `${body}\n${sig}`;
