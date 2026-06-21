@@ -21,6 +21,7 @@ import {
 } from "../zoho.js";
 import { generateDraft, improveDraft } from "../gemini.js";
 import { getSettings, saveSettings, appendSignature } from "../settings.js";
+import { searchOrdersByEmail } from "../wix.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
@@ -56,13 +57,14 @@ router.post("/:id/draft", async (req, res) => {
     const ticket = req.body.ticket;
     if (!ticket) return res.status(400).json({ error: "Missing ticket payload" });
     const conversation = await getConversation(req.params.id);
-    // retrieve only the KB articles relevant to this ticket (semantic + fallback)
-    // and pull the customer's attached photos so the AI can look at them too
-    const [kb, images] = await Promise.all([
+    // retrieve relevant KB, the customer's attached photos, and their real
+    // store orders (by email) so the AI can ground the reply in all three
+    const [kb, images, orders] = await Promise.all([
       retrieveRelevant({ ticket, conversation }, 8),
       fetchConversationImages(req.params.id, conversation),
+      ticket.customerEmail ? searchOrdersByEmail(ticket.customerEmail).catch(() => []) : [],
     ]);
-    const result = await generateDraft({ ticket, conversation, kb, images });
+    const result = await generateDraft({ ticket, conversation, kb, images, orders });
     // append the official signature so every AI draft ends consistently
     try {
       const { signature } = await getSettings();

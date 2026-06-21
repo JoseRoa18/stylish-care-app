@@ -20,6 +20,7 @@ import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 import { feedbackMetrics } from "./feedback.js";
+import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import {
   authEnabled,
   checkPassword,
@@ -92,6 +93,7 @@ export function createApp() {
       zoho: zohoConfigured(),
       dropbox: dropboxConfigured(),
       gemini: geminiConfigured(),
+      wix: wixConfigured(),
     })
   );
 
@@ -227,6 +229,22 @@ export function createApp() {
         lastFetch: new Date().toISOString(),
         error: null,
       });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Wix store lookups — customer orders (by email) + product search.
+  app.get("/api/wix/orders", async (req, res) => {
+    try {
+      res.json({ orders: await searchOrdersByEmail(req.query.email || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.get("/api/wix/products", async (req, res) => {
+    try {
+      res.json({ products: await searchProducts(req.query.q || "") });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

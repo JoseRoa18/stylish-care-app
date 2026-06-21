@@ -616,6 +616,19 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // ticket attachments (#7)
   const [attachments, setAttachments] = useState([]);
 
+  // Wix store: customer orders + product lookup
+  const [orders, setOrders] = useState(null);
+  const [prodQ, setProdQ] = useState("");
+  const [prodResults, setProdResults] = useState(null);
+  const [prodLoading, setProdLoading] = useState(false);
+  const lookupProducts = async () => {
+    if (!prodQ.trim()) return;
+    setProdLoading(true);
+    try { const r = await api.wixProducts(prodQ.trim()); setProdResults(r.products || []); }
+    catch { setProdResults([]); }
+    finally { setProdLoading(false); }
+  };
+
   // private internal notes
   const [notes, setNotes] = useState([]);
   const [noteText, setNoteText] = useState("");
@@ -658,9 +671,12 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   const loadConversation = useCallback(async () => {
     setConvoLoading(true);
     setConvoError(null);
-    // fetch the file list + notes in parallel — non-blocking, best-effort
+    // fetch the file list + notes + store orders in parallel — best-effort
     api.attachments(ticket.id).then((r) => setAttachments(r.attachments || [])).catch(() => {});
     api.notes(ticket.id).then((r) => setNotes(r.notes || [])).catch(() => {});
+    if (ticket.customerEmail)
+      api.wixOrders(ticket.customerEmail).then((r) => setOrders(r.orders || [])).catch(() => setOrders([]));
+    else setOrders([]);
     try {
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
@@ -921,6 +937,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               </div>
             </>
           )}
+
+          {/* ── Wix store: customer orders + product lookup ──── */}
+          {orders && orders.length > 0 && (
+            <div style={{ margin: "12px 0 4px" }}>
+              <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>🛒 Customer orders ({orders.length})</div>
+              {orders.map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
+            </div>
+          )}
+          <ProductLookup
+            q={prodQ} setQ={setProdQ} results={prodResults} loading={prodLoading} onSearch={lookupProducts}
+          />
 
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
 
@@ -1367,6 +1394,76 @@ function MessageAttachments({ ticketId, threadId, attachments }) {
       {attachments.map((a) => (
         <Attachment key={a.id} url={api.threadAttachmentUrl(ticketId, threadId, a.id, a.name)} name={a.name} size={a.size} />
       ))}
+    </div>
+  );
+}
+
+// ── Wix order card + product lookup ──────────────────────────
+const FULFILL_COLOR = { FULFILLED: "#3b7a57", PARTIALLY_FULFILLED: "#c8912a", NOT_FULFILLED: "#8a857c" };
+const PAY_COLOR = { PAID: "#3b7a57", NOT_PAID: "#c0392b", PARTIALLY_REFUNDED: "#c8912a", FULLY_REFUNDED: "#c0392b" };
+
+function Pill({ text, color }) {
+  return (
+    <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, color: color || "#666", border: `1px solid ${color || "#ccc"}` }}>
+      {(text || "").replace(/_/g, " ").toLowerCase()}
+    </span>
+  );
+}
+
+function OrderCard({ order }) {
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="mono" style={{ fontWeight: 700 }}>#{order.number}</span>
+        <Pill text={order.fulfillmentStatus} color={FULFILL_COLOR[order.fulfillmentStatus]} />
+        <Pill text={order.paymentStatus} color={PAY_COLOR[order.paymentStatus]} />
+        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>{order.total}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{order.site} · {fmtDate(order.date)}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>
+        {order.items.map((i) => `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ""}`).join(" · ")}
+      </div>
+      {order.tracking.map((t, i) => (
+        <div key={i} style={{ fontSize: 12, marginTop: 4 }}>
+          📦 {t.carrier || "Tracking"}:{" "}
+          {t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.number}</a> : <span className="mono">{t.number}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProductLookup({ q, setQ, results, loading, onSearch }) {
+  return (
+    <div style={{ margin: "10px 0 4px" }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          className="field"
+          placeholder="🔎 Look up a product (e.g. K-131G)…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSearch()}
+          style={{ flex: "0 1 320px", padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+        />
+        <button className="btn sm" onClick={onSearch} disabled={loading || !q.trim()}>
+          {loading ? <span className="spin" /> : "Search"}
+        </button>
+      </div>
+      {results && (
+        <div style={{ marginTop: 6 }}>
+          {results.length === 0 ? (
+            <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>No products found.</span>
+          ) : (
+            results.slice(0, 8).map((p, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>
+                {p.url ? <a href={p.url} target="_blank" rel="noreferrer" style={{ flex: 1 }}>{p.name}</a> : <span style={{ flex: 1 }}>{p.name}</span>}
+                {p.price && <span style={{ color: "var(--ink-soft)" }}>{p.price}</span>}
+                <Pill text={p.inStock ? `in stock${p.quantity != null ? ` (${p.quantity})` : ""}` : "out of stock"} color={p.inStock ? "#3b7a57" : "#c0392b"} />
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

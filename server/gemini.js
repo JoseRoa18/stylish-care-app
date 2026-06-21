@@ -4,6 +4,8 @@
 // Google's Gemini API with structured JSON output. Nothing is auto-sent — a
 // human always approves; the triage just tells them how much care it needs.
 
+import { ordersToText } from "./wix.js";
+
 const { GEMINI_API_KEY, GEMINI_MODEL } = process.env;
 const MODEL = GEMINI_MODEL || "gemini-3.1-pro-preview";
 
@@ -58,6 +60,7 @@ ACCURACY (never sacrifice this for tone):
 - Articles tagged "source: resolved-ticket" are generalized summaries of how the team actually handled similar PAST cases ("Situation … / How we resolved it …"). Use them as REFERENCE for the right approach, policy and tone for this kind of case — never copy them, and never assume this customer's specifics match the past case (the summaries are anonymized and carry no real names, orders or amounts).
 - Do NOT assert regulatory or compliance claims (e.g. "lead-free", NSF/ANSI, cUPC, certifications) unless those exact claims appear in the Knowledge Base. If a customer asks about them and the KB doesn't confirm, treat it as not covered and escalate.
 - CUSTOMER PHOTOS: when the customer's attached photos are included with this request, look at them and use what is CLEARLY visible to tailor the reply (identify the product/part, acknowledge what they show — it reassures the customer that their photos were reviewed). Observations are context only: never draw a definitive fault/cause/defect conclusion from a photo alone, and never promise an outcome based on it — the formal review still applies (see WARRANTY below).
+- CUSTOMER ORDERS: a "CUSTOMER ORDERS (from store)" section may list this customer's real orders (number, items, payment & fulfillment status, tracking). Use it to answer order/shipping questions precisely — confirm the order number, what shipped, and share the tracking number/carrier when present. Only use orders whose details clearly match what the customer is asking about; if none match, don't guess — ask which order they mean. Never invent an order number, tracking number or status that isn't in this section.
 - If the articles don't cover the question, don't guess. Reassure the customer, let them know the team will follow up, and be specific about what will be clarified and what happens next. (See CONTINUITY below — don't introduce a new, unnamed "specialist" unless the thread already did.)
 - If a Knowledge Base article is a video tutorial (source: youtube) that directly helps, you MAY include its exact URL (e.g. "Here's a quick video that walks you through it: <url>"). Only ever share YouTube video URLs — never any other article's URL or internal links.
 - NEVER invent, guess, or reconstruct a URL. A video URL may ONLY be copied character-for-character from the "url:" field of a youtube article in the Knowledge Base below. If an article mentions that a video exists but no youtube article with a url is provided, do NOT include any link — describe the steps in words instead.
@@ -222,10 +225,14 @@ export async function improveDraft({ draft }) {
   return { reply: reply.trim() || src };
 }
 
-export async function generateDraft({ ticket, conversation, kb, images = [] }) {
+export async function generateDraft({ ticket, conversation, kb, images = [], orders = [] }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");
   }
+
+  const ordersBlock = orders.length
+    ? `\n=== CUSTOMER ORDERS (from store) ===\n${ordersToText(orders)}\n`
+    : "";
 
   const userContent = `Customer: ${ticket.customerName} <${ticket.customerEmail}>
 Subject: ${ticket.subject}
@@ -233,7 +240,7 @@ Channel: ${ticket.channel || "Email"}
 
 === CONVERSATION (oldest first) ===
 ${conversationToText(conversation)}
-${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}
+${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}
 === APPROVED KNOWLEDGE BASE ===
 ${kbToText(kb)}
 

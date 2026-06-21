@@ -105,6 +105,9 @@ export default function App() {
           <span>
             <i className="status-dot" style={dot(health.dropbox)} /> Dropbox
           </span>
+          <span>
+            <i className="status-dot" style={dot(health.wix)} /> Wix
+          </span>
           <button className="btn sm" onClick={() => setSettingsOpen(true)} title="Settings (signature)" style={{ marginLeft: 4 }}>
             ⚙
           </button>
