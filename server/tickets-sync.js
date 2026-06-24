@@ -259,13 +259,17 @@ export async function queryTickets({ view = "active", q = "", page = 1, pageSize
   const offset = (Math.max(1, page) - 1) * pageSize;
   let query = supabase.from("tickets").select("*", { count: "exact" });
 
-  if (view === "active") query = query.not("status", "ilike", "%closed%");
-  // "open" mirrors Zoho's "Open Tickets" view: open-TYPE statuses
-  else if (view === "open") query = query.in("status", ["Open", "Escalated"]);
-  else if (view === "closed") query = query.ilike("status", "%closed%");
-  else if (view && view !== "all") query = query.eq("status", view);
-
   const s = String(q || "").trim().replace(/[%,()]/g, " ").trim();
+  // When searching, ignore the status chip and look across ALL tickets — the
+  // agent searching an email/number expects to find it whatever its status.
+  if (!s) {
+    if (view === "active") query = query.not("status", "ilike", "%closed%");
+    // "open" mirrors Zoho's "Open Tickets" view: open-TYPE statuses
+    else if (view === "open") query = query.in("status", ["Open", "Escalated"]);
+    else if (view === "closed") query = query.ilike("status", "%closed%");
+    else if (view && view !== "all") query = query.eq("status", view);
+  }
+
   if (s) {
     query = query.or(
       [

@@ -631,6 +631,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
 
   // Wix store: customer orders + product lookup
   const [orders, setOrders] = useState(null);
+  const [ordersExpanded, setOrdersExpanded] = useState(false);
+  const [showAllMsgs, setShowAllMsgs] = useState(false);
   const [prodQ, setProdQ] = useState("");
   const [prodResults, setProdResults] = useState(null);
   const [prodLoading, setProdLoading] = useState(false);
@@ -866,6 +868,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {sent && <span className="badge sent">✓ Sent</span>}
           <WaitTimer since={ticket.customerResponseTime} status={status} />
           <StatusSelect status={status} options={statusOptions} onChange={changeStatus} saving={statusSaving} />
+          {!/escalat/i.test(status) && (
+            <button
+              className="btn sm"
+              title="Escalate this ticket"
+              disabled={statusSaving}
+              onClick={(e) => { e.stopPropagation(); changeStatus("Escalated"); }}
+              style={{ color: "#c0392b", borderColor: "#e3b9b3" }}
+            >
+              ⤴ Escalate
+            </button>
+          )}
           <button
             className="btn sm"
             title="Mark as spam (hide from inbox)"
@@ -933,7 +946,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 </div>
               </div>
               <div className="convo">
+                {conversation.length > 3 && !showAllMsgs && (
+                  <button className="btn sm" onClick={() => setShowAllMsgs(true)} style={{ alignSelf: "center" }}>
+                    ▾ Show {conversation.length - 3} earlier message{conversation.length - 3 === 1 ? "" : "s"}
+                  </button>
+                )}
                 {conversation.map((m, i) => {
+                  if (!showAllMsgs && conversation.length > 3 && i < conversation.length - 3) return null;
                   const txt = view !== "orig" && xcache[view] ? xcache[view][i] : m.text;
                   return (
                     <div key={m.id} className={`msg ${m.direction === "out" ? "out" : "in"}`}>
@@ -961,8 +980,16 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {/* ── Wix store: customer orders + product lookup ──── */}
           {orders && orders.length > 0 && (
             <div style={{ margin: "12px 0 4px" }}>
-              <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>🛒 Customer orders ({orders.length})</div>
-              {orders.map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
+              <div
+                style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6, cursor: orders.length > 2 ? "pointer" : "default", userSelect: "none" }}
+                onClick={() => orders.length > 2 && setOrdersExpanded((v) => !v)}
+              >
+                🛒 Customer orders ({orders.length}){orders.length > 2 ? (ordersExpanded ? " ▲" : " ▾ show all") : ""}
+              </div>
+              {(ordersExpanded ? orders : orders.slice(0, 2)).map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
+              {!ordersExpanded && orders.length > 2 && (
+                <button className="btn sm" onClick={() => setOrdersExpanded(true)}>+ {orders.length - 2} more orders</button>
+              )}
             </div>
           )}
           <ProductLookup
@@ -1090,6 +1117,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 <div style={{ maxHeight: 280, overflowY: "auto" }}>
                   {templates
                     .filter((t) => !tplSearch || `${t.title} ${t.body}`.toLowerCase().includes(tplSearch.toLowerCase()))
+                    .slice()
+                    .sort((a, b) => (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base", numeric: true }))
                     .map((t) => (
                       <div
                         key={t.id}
