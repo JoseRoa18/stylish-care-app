@@ -71,6 +71,7 @@ export const api = {
     req(`/tickets/${id}/phone-history${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`),
   rcRecordingUrl: (id) => `/api/ringcentral/recording/${encodeURIComponent(id)}`,
   rcVoicemailUrl: (msgId, attId) => `/api/ringcentral/voicemail/${encodeURIComponent(msgId)}/${encodeURIComponent(attId)}`,
+  rcRecent: (days = 7) => req(`/ringcentral/recent?days=${days}`),
   rcSendSms: (to, text) => req(`/ringcentral/sms`, { method: "POST", body: JSON.stringify({ to, text }) }),
   rcRingout: (to, from) => req(`/ringcentral/ringout`, { method: "POST", body: JSON.stringify({ to, from }) }),
   getSettings: () => req(`/tickets/settings`),

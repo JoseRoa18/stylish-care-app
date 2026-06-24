@@ -29,6 +29,8 @@ import {
   voicemailAudioPath,
   sendSms,
   ringOut,
+  getRecentCalls,
+  getRecentVoicemails,
 } from "./ringcentral.js";
 import {
   authEnabled,
@@ -256,6 +258,20 @@ export function createApp() {
   app.get("/api/wix/products", async (req, res) => {
     try {
       res.json({ products: await searchProducts(req.query.q || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Recent inbound calls + voicemails to the line ("who called").
+  app.get("/api/ringcentral/recent", async (req, res) => {
+    try {
+      const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
+      const [calls, voicemails] = await Promise.all([
+        getRecentCalls({ days }).catch(() => []),
+        getRecentVoicemails({ days: Math.max(days, 14) }).catch(() => []),
+      ]);
+      res.json({ calls, voicemails });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

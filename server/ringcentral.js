@@ -77,6 +77,43 @@ export async function getCallHistory(phone, { days = 180, limit = 25 } = {}) {
   }));
 }
 
+// ── recent inbound calls to the line (the "who called" view) ──
+export async function getRecentCalls({ days = 7, limit = 50 } = {}) {
+  if (!ringcentralConfigured()) return [];
+  const data = await rcGet(
+    `/restapi/v1.0/account/~/call-log?view=Detailed&direction=Inbound&perPage=${limit}&dateFrom=${ISO(days)}`
+  ).catch(() => ({ records: [] }));
+  return (data.records || []).map((r) => ({
+    id: r.id,
+    time: r.startTime,
+    fromNumber: r.from?.phoneNumber || null,
+    fromName: r.from?.name || null,
+    toNumber: r.to?.phoneNumber || null,
+    result: r.result,
+    durationSec: r.duration || 0,
+    recordingId: r.recording?.id || null,
+  }));
+}
+
+export async function getRecentVoicemails({ days = 21, limit = 40 } = {}) {
+  if (!ringcentralConfigured()) return [];
+  const data = await rcGet(
+    `/restapi/v1.0/account/~/extension/~/message-store?messageType=VoiceMail&perPage=${limit}&dateFrom=${ISO(days)}`
+  ).catch(() => ({ records: [] }));
+  return (data.records || []).map((m) => {
+    const audio = (m.attachments || []).find((a) => a.type === "AudioRecording");
+    return {
+      id: m.id,
+      time: m.creationTime,
+      fromNumber: m.from?.phoneNumber || null,
+      fromName: m.from?.name || null,
+      durationSec: audio?.vmDuration || null,
+      audioId: audio?.id || null,
+      unread: m.readStatus !== "Read",
+    };
+  });
+}
+
 // ── messages (voicemail + SMS) for a phone number ────────────
 async function getMessages(phone, type, { days = 180, limit = 25 } = {}) {
   const num = digits(phone);

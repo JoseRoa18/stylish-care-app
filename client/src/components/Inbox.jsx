@@ -21,7 +21,7 @@ const SORT_OPTIONS = [
   { key: "waiting", label: "Longest waiting" },
 ];
 
-export default function Inbox({ signature = "" }) {
+export default function Inbox({ signature = "", initialSearch = "" }) {
   const [tickets, setTickets] = useState([]);
   const [counts, setCounts] = useState({ all: 0, active: 0, closed: 0, byStatus: {} });
   const [total, setTotal] = useState(0);
@@ -40,6 +40,9 @@ export default function Inbox({ signature = "" }) {
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 50;
+
+  // when arriving from the Calls tab with a caller to find
+  useEffect(() => { if (initialSearch) setSearch(initialSearch); }, [initialSearch]);
 
   // debounce the search box so we don't query on every keystroke
   useEffect(() => {
