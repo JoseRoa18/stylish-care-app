@@ -34,6 +34,8 @@ export default function Inbox({ signature = "" }) {
 
   const [view, setView] = useState("open");
   const [sort, setSort] = useState("updated");
+  const [layout, setLayout] = useState(() => localStorage.getItem("inboxLayout") || "split");
+  useEffect(() => { localStorage.setItem("inboxLayout", layout); }, [layout]);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
@@ -114,6 +116,10 @@ export default function Inbox({ signature = "" }) {
           <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
             {loading ? "Syncing…" : `Auto-syncs every 30s · last ${fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : "—"}`}
           </span>
+          <div className="seg">
+            <button className={layout === "split" ? "active" : ""} title="Peek view (list + side panel)" onClick={() => setLayout("split")}>◫ Peek</button>
+            <button className={layout === "list" ? "active" : ""} title="List view" onClick={() => setLayout("list")}>☰ List</button>
+          </div>
           <button className="btn sm" onClick={load}>↻ Refresh</button>
         </div>
       </div>
@@ -179,6 +185,33 @@ export default function Inbox({ signature = "" }) {
 
       {tickets.length === 0 ? (
         <div className="empty">{loading ? "Loading…" : "No tickets match this view."}</div>
+      ) : layout === "split" ? (
+        <div className="peek">
+          <div className="peek-list">
+            {tickets.map((t) => (
+              <CompactRow key={t.id} ticket={t} selected={openId === t.id} onClick={() => setOpenId(t.id)} />
+            ))}
+          </div>
+          <div className="peek-detail">
+            {(() => {
+              const sel = tickets.find((t) => t.id === openId);
+              return sel ? (
+                <TicketRow
+                  key={sel.id}
+                  ticket={sel}
+                  statusOptions={statusOptions}
+                  signature={signature}
+                  open
+                  peek
+                  onToggle={() => {}}
+                  onChanged={load}
+                />
+              ) : (
+                <div className="empty" style={{ marginTop: 40 }}>← Select a ticket to view it</div>
+              );
+            })()}
+          </div>
+        </div>
       ) : (
         tickets.map((t) => (
           <TicketRow
@@ -410,7 +443,23 @@ function StatusSelect({ status, options = [], onChange, saving }) {
   );
 }
 
-function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "" }) {
+// Compact row for the peek (split) view — click to open the ticket on the right.
+function CompactRow({ ticket, selected, onClick }) {
+  return (
+    <div className={`peek-row ${selected ? "sel" : ""}`} onClick={onClick}>
+      <div className="peek-subj">{ticket.subject}</div>
+      <div className="peek-meta">
+        <span className="mono">#{ticket.number}</span>
+        <span className="peek-cust">{ticket.customerName}</span>
+        <span style={{ marginLeft: "auto", flexShrink: 0 }}>
+          <WaitTimer since={ticket.customerResponseTime} status={ticket.status} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "", peek = false }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
