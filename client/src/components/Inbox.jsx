@@ -302,6 +302,14 @@ function WaitTimer({ since, status }) {
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+// Drop <img> tags whose src isn't a real web URL (broken blob:/data:/cid: from a
+// pasted screenshot) so we never send a broken image to the customer.
+function stripBrokenImgs(html) {
+  return String(html || "").replace(/<img\b[^>]*>/gi, (tag) => {
+    const m = tag.match(/\ssrc\s*=\s*["']([^"']*)["']/i);
+    return m && /^https?:\/\//i.test(m[1]) ? tag : "";
+  });
+}
 // AI draft is plain text → HTML for the rich editor (links + line breaks).
 function plainToHtml(text) {
   return escapeHtml(text)
@@ -318,7 +326,7 @@ function draftToHtml(draft) {
 // Minimal rich-text editor (contentEditable + execCommand). Uncontrolled: the
 // content is set only when `docKey` changes (new/regenerated draft), so typing
 // never resets the cursor. Parent reads the html via onChange.
-function RichEditor({ docKey, initialHtml, disabled, onChange }) {
+function RichEditor({ docKey, initialHtml, disabled, onChange, onImagePaste }) {
   const ref = useRef(null);
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = initialHtml || "";
@@ -340,8 +348,22 @@ function RichEditor({ docKey, initialHtml, disabled, onChange }) {
     </button>
   );
 
-  // Pasting plain text that contains a URL → auto-convert it to a hyperlink.
   const onPaste = (e) => {
+    // Pasting an image (screenshot) → upload it as an attachment instead of
+    // letting the browser insert a broken temporary <img>.
+    const imgs = [];
+    for (const it of e.clipboardData?.items || []) {
+      if (it.kind === "file" && (it.type || "").startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) imgs.push(f);
+      }
+    }
+    if (imgs.length) {
+      e.preventDefault();
+      onImagePaste?.(imgs);
+      return;
+    }
+    // Pasting plain text that contains a URL → auto-convert it to a hyperlink.
     const html = e.clipboardData?.getData("text/html");
     const text = e.clipboardData?.getData("text/plain");
     if (html || !text || !/https?:\/\/\S/.test(text)) return; // let rich paste through
@@ -860,7 +882,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     setSendError(null);
     try {
       await api.send(
-        ticket.id, toEmail.trim(), draftHtml, "html",
+        ticket.id, toEmail.trim(), stripBrokenImgs(draftHtml), "html",
         aiMeta
           ? {
               aiDraft: aiMeta.draft, intent: aiMeta.intent,
@@ -1283,6 +1305,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                   initialHtml={draftHtml}
                   disabled={sent}
                   onChange={setDraftHtml}
+                  onImagePaste={uploadFiles}
                 />
                 {dragOver && (
                   <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(154,107,47,0.08)", borderRadius: 10, pointerEvents: "none", fontSize: 14, color: "var(--brass)", fontWeight: 600 }}>
