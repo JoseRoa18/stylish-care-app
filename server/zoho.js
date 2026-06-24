@@ -515,7 +515,10 @@ export async function fetchConversationImages(
   return images;
 }
 
-// Upload a file onto the ticket; returns { id } to reference in sendReply.
+// Upload a file for use in an OUTGOING reply. Uses the dedicated /uploads
+// endpoint (needs the Desk.basic.ALL scope) — the returned id is the one
+// sendReply's attachmentIds expects. (Uploading to /tickets/{id}/attachments
+// makes a ticket attachment whose id does NOT bind to a reply.)
 export async function uploadTicketAttachment(ticketId, { buffer, filename, mime }) {
   const token = await getAccessToken();
   const fd = new FormData();
@@ -524,7 +527,7 @@ export async function uploadTicketAttachment(ticketId, { buffer, filename, mime 
     new Blob([buffer], { type: mime || "application/octet-stream" }),
     filename || "attachment"
   );
-  const res = await fetch(`${ZOHO_API_BASE}/tickets/${ticketId}/attachments`, {
+  const res = await fetch(`${ZOHO_API_BASE}/uploads`, {
     method: "POST",
     headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID },
     body: fd, // fetch sets the multipart boundary header itself
@@ -532,7 +535,7 @@ export async function uploadTicketAttachment(ticketId, { buffer, filename, mime 
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.id) {
     throw new Error(
-      `Zoho attachment upload failed (${res.status}): ${data.message || data.errorCode || "unknown"}`
+      `Zoho upload failed (${res.status}): ${data.message || data.errorCode || "unknown"}`
     );
   }
   return { id: data.id, name: data.name || filename, size: Number(data.size) || buffer.length };
