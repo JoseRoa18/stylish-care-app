@@ -112,7 +112,7 @@ async function distill(conversation, { retries = 2 } = {}) {
   }
 }
 
-function toArticle(ticketId, d) {
+function toArticle(ticketId, d, ticketDate) {
   const body = `Situation: ${d.situation}\n\nHow we resolved it: ${d.resolution}`;
   const tags = [...new Set([d.intent, ...(d.tags || [])].filter(Boolean))];
   return {
@@ -123,7 +123,8 @@ function toArticle(ticketId, d) {
     tags,
     source: SOURCE,
     sourceUrl: null,
-    updatedAt: new Date().toISOString(),
+    // use the ticket's own date so retrieval can prefer recent resolutions
+    updatedAt: ticketDate || new Date().toISOString(),
   };
 }
 
@@ -145,20 +146,20 @@ async function upsertArticles(articles) {
 // "Closed Wayfair" status is mostly automated RA/return/marketing notifications
 // with no agent reply — noise for the KB — so it's excluded by default.
 async function closedTicketIds(limit, statuses = ["Closed"]) {
-  const ids = [];
+  const rows = [];
   const PAGE = 1000;
-  for (let from = 0; ids.length < limit; from += PAGE) {
+  for (let from = 0; rows.length < limit; from += PAGE) {
     const { data, error } = await supabase
       .from("tickets")
-      .select("id")
+      .select("id,created_time,closed_time")
       .in("status", statuses)
       .order("created_time", { ascending: false, nullsFirst: false })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
-    ids.push(...data.map((r) => r.id));
+    rows.push(...data.map((r) => ({ id: r.id, date: r.closed_time || r.created_time })));
     if (data.length < PAGE) break;
   }
-  return ids.slice(0, limit);
+  return rows.slice(0, limit);
 }
 
 async function alreadyIngested() {
@@ -192,7 +193,7 @@ export async function ingestResolvedTickets({
   const stats = { scanned: 0, skippedExisting: 0, noThread: 0, notUsable: 0, ingested: 0, errors: 0, total: ids.length };
   let buffer = [];
 
-  for (const id of ids) {
+  for (const { id, date } of ids) {
     if (skipExisting && done.has(`RT-${id}`)) { stats.skippedExisting++; continue; }
     stats.scanned++;
     try {
@@ -201,7 +202,7 @@ export async function ingestResolvedTickets({
       else {
         const d = await distill(conversation);
         if (!d.usable) stats.notUsable++;
-        else { buffer.push(toArticle(id, d)); }
+        else { buffer.push(toArticle(id, d, date)); }
       }
     } catch (e) {
       stats.errors++;

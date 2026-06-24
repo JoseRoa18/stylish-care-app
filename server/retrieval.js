@@ -23,12 +23,16 @@ function tokenize(text) {
 }
 
 import { semanticSearch, keywordSearch } from "./kb-index.js";
+import { supabase } from "./supabase.js";
 
 // Pull a wider candidate pool than k, then diversify so one source can't
 // monopolise the final set. With 500+ resolved-ticket entries, a query can
 // otherwise return k near-duplicate past cases and crowd out the one video
 // tutorial or reply template that would help.
 const POOL = Number(process.env.RETRIEVAL_POOL || 40);
+// Resolved-ticket recency: drop cases older than this, and nudge older ones
+// down so the AI grounds on the team's CURRENT answers, not years-old ones.
+const RT_MAX_AGE_MONTHS = Number(process.env.RT_MAX_AGE_MONTHS || 24);
 const RESERVE_SOURCES = ["youtube", "zoho-template"];
 const RESERVE_MARGIN = Number(process.env.RETRIEVAL_RESERVE_MARGIN || 0.1); // within this of the top score
 const RESERVE_FLOOR = Number(process.env.RETRIEVAL_RESERVE_FLOOR || 0.6); // and at least this similar absolutely
@@ -39,8 +43,11 @@ const RESERVE_FLOOR = Number(process.env.RETRIEVAL_RESERVE_FLOOR || 0.6); // and
 export async function retrieveRelevant({ ticket, conversation }, k = 8) {
   const query = buildQuery({ ticket, conversation });
   try {
-    const pool = await semanticSearch(query, null, Math.max(POOL, k));
-    if (pool && pool.length) return diversify(pool, k);
+    let pool = await semanticSearch(query, null, Math.max(POOL, k));
+    if (pool && pool.length) {
+      pool = await applyRecency(pool);
+      return diversify(pool, k);
+    }
   } catch {
     // embedding unavailable/errored → keyword fallback below
   }
@@ -49,6 +56,35 @@ export async function retrieveRelevant({ ticket, conversation }, k = 8) {
   } catch {
     return [];
   }
+}
+
+// Drop stale resolved-ticket cases and penalise older ones by age, so among
+// similarly-relevant past cases the most RECENT resolution wins (current policy)
+// instead of a years-old one. Other sources (manuals/templates/web) are
+// reference material and aren't time-decayed.
+async function applyRecency(pool) {
+  const rtIds = pool.filter((a) => a.source === "resolved-ticket").map((a) => a.id);
+  if (!rtIds.length) return pool;
+  let dates;
+  try {
+    const { data } = await supabase.from("kb_articles").select("id,updated_at").in("id", rtIds);
+    dates = new Map((data || []).map((r) => [r.id, r.updated_at]));
+  } catch {
+    return pool; // dates unavailable → leave ranking as-is
+  }
+  const now = Date.now();
+  const out = [];
+  for (const a of pool) {
+    if (a.source === "resolved-ticket") {
+      const d = dates.get(a.id);
+      const ageMonths = d ? (now - new Date(d).getTime()) / (30 * 86400000) : 999;
+      if (ageMonths > RT_MAX_AGE_MONTHS) continue; // too old to trust — drop it
+      a._score = (a._score ?? 0) - Math.min(0.12, Math.max(0, (ageMonths - 1) * 0.01));
+    }
+    out.push(a);
+  }
+  out.sort((x, y) => (y._score ?? 0) - (x._score ?? 0));
+  return out;
 }
 
 // Guarantee the final set keeps a slot for the best video tutorial and the best
