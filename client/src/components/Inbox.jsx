@@ -649,12 +649,27 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [noteFiles, setNoteFiles] = useState([]); // images/files to attach to the note
+  const [noteUploading, setNoteUploading] = useState(false);
+  const noteFileRef = useRef(null);
+  const onPickNoteFiles = async (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = "";
+    if (!files.length) return;
+    setNoteUploading(true);
+    for (const f of files) {
+      try { const up = await api.uploadAttachment(ticket.id, f); setNoteFiles((prev) => [...prev, up]); }
+      catch (err) { alert(`Could not attach ${f.name}: ${err.message}`); }
+    }
+    setNoteUploading(false);
+  };
   const addNote = async () => {
-    if (!noteText.trim()) return;
+    if (!noteText.trim() && !noteFiles.length) return;
     setSavingNote(true);
     try {
-      await api.addNote(ticket.id, noteText);
+      await api.addNote(ticket.id, noteText, noteFiles.map((f) => f.id));
       setNoteText("");
+      setNoteFiles([]);
       const r = await api.notes(ticket.id);
       setNotes(r.notes || []);
     } catch (e) {
@@ -1015,14 +1030,27 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     No internal notes yet. These are private — the customer never sees them.
                   </div>
                 )}
-                {notes.map((n) => (
-                  <div key={n.id} style={{ borderLeft: "3px solid var(--amber)", paddingLeft: 10, margin: "8px 0", fontSize: 13 }}>
-                    <div style={{ whiteSpace: "pre-wrap" }}>{n.content.replace(/<[^>]+>/g, "")}</div>
-                    <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
-                      {n.author || "Agent"} · {fmtTime(n.createdTime)}
+                {notes.map((n) => {
+                  const text = (n.content || "").replace(/<[^>]+>/g, " ").trim();
+                  return (
+                    <div key={n.id} style={{ borderLeft: "3px solid var(--amber)", paddingLeft: 10, margin: "8px 0", fontSize: 13 }}>
+                      {text && <div style={{ whiteSpace: "pre-wrap" }}>{text}</div>}
+                      {n.attachments?.length > 0 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                          {n.attachments.map((a) => {
+                            const url = api.noteAttachmentUrl(ticket.id, n.id, a.id, a.name);
+                            return IMAGE_RE.test(a.name || "")
+                              ? <Thumb key={a.id} url={url} name={a.name} size={a.size} height={64} />
+                              : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>📄 {a.name}</a>;
+                          })}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
+                        {n.author || "Agent"} · {fmtTime(n.createdTime)}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <textarea
                     rows={2}
@@ -1031,10 +1059,26 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     onChange={(e) => setNoteText(e.target.value)}
                     style={{ flex: 1, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
                   />
-                  <button className="btn sm primary" disabled={savingNote || !noteText.trim()} onClick={addNote}>
-                    {savingNote ? "Saving…" : "Add note"}
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input ref={noteFileRef} type="file" multiple accept="image/*,application/pdf" style={{ display: "none" }} onChange={onPickNoteFiles} />
+                    <button className="btn sm" disabled={noteUploading} onClick={() => noteFileRef.current?.click()} title="Attach an image/screenshot">
+                      {noteUploading ? "…" : "📎 Image"}
+                    </button>
+                    <button className="btn sm primary" disabled={savingNote || (!noteText.trim() && !noteFiles.length)} onClick={addNote}>
+                      {savingNote ? "Saving…" : "Add note"}
+                    </button>
+                  </div>
                 </div>
+                {noteFiles.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                    {noteFiles.map((f) => (
+                      <span key={f.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 11 }}>
+                        📎 {f.name}
+                        <button type="button" onClick={() => setNoteFiles((prev) => prev.filter((x) => x.id !== f.id))} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, opacity: 0.6 }}>✕</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

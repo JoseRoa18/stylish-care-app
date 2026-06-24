@@ -79,8 +79,10 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
   notes: (id) => req(`/tickets/${id}/notes`),
-  addNote: (id, content) =>
-    req(`/tickets/${id}/notes`, { method: "POST", body: JSON.stringify({ content }) }),
+  addNote: (id, content, attachmentIds) =>
+    req(`/tickets/${id}/notes`, { method: "POST", body: JSON.stringify({ content, attachmentIds }) }),
+  noteAttachmentUrl: (id, commentId, attId, name) =>
+    `/api/tickets/${id}/comments/${commentId}/attachments/${attId}/download?name=${encodeURIComponent(name || "file")}`,
   markSpam: (id) => req(`/tickets/${id}/spam`, { method: "POST" }),
   trash: (id) => req(`/tickets/${id}/trash`, { method: "POST" }),
   setSubject: (id, subject) =>

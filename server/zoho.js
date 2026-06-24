@@ -428,18 +428,37 @@ export async function listTicketComments(ticketId) {
   return (data?.data || []).map((c) => ({
     id: c.id,
     content: c.content || "",
+    contentType: c.contentType,
     isPublic: Boolean(c.isPublic),
     author: c.commenter?.name || c.commentedBy || "",
     createdTime: c.commentedTime || c.createdTime,
+    attachments: (c.attachments || []).map((a) => ({ id: a.id, name: a.name, size: Number(a.size) || 0 })),
   }));
 }
 
-export async function addTicketComment(ticketId, content) {
-  if (!content?.trim()) throw new Error("Empty note");
+export async function addTicketComment(ticketId, content, attachmentIds) {
+  const hasFiles = Array.isArray(attachmentIds) && attachmentIds.length;
+  if (!content?.trim() && !hasFiles) throw new Error("Empty note");
+  const body = { content: (content || "").trim() || " ", isPublic: false, contentType: "plainText" };
+  if (hasFiles) body.attachmentIds = attachmentIds.map(String);
   return zohoFetch(`/tickets/${ticketId}/comments`, {
     method: "POST",
-    body: JSON.stringify({ content: content.trim(), isPublic: false, contentType: "plainText" }),
+    body: JSON.stringify(body),
   });
+}
+
+// Binary content of a file attached to a private note (comment).
+export async function downloadCommentAttachment(ticketId, commentId, attId) {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `${ZOHO_API_BASE}/tickets/${ticketId}/comments/${commentId}/attachments/${attId}/content`,
+    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
+  );
+  if (!res.ok) throw new Error(`Zoho comment attachment download failed (${res.status})`);
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+  };
 }
 
 // ── ticket attachments (view + upload) ───────────────────────

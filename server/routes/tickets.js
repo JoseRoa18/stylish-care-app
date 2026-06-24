@@ -10,6 +10,7 @@ import {
   moveTicketToTrash,
   listTicketComments,
   addTicketComment,
+  downloadCommentAttachment,
   listTicketAttachments,
   downloadTicketAttachment,
   downloadThreadAttachment,
@@ -113,10 +114,25 @@ router.get("/:id/notes", async (req, res) => {
 });
 router.post("/:id/notes", async (req, res) => {
   try {
-    const { content } = req.body;
-    if (!content?.trim()) return res.status(400).json({ error: "Empty note" });
-    await addTicketComment(req.params.id, content);
+    const { content, attachmentIds } = req.body;
+    if (!content?.trim() && !(attachmentIds || []).length)
+      return res.status(400).json({ error: "Empty note" });
+    await addTicketComment(req.params.id, content, attachmentIds);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET …/comments/:commentId/attachments/:attId/download — note image/file.
+router.get("/:id/comments/:commentId/attachments/:attId/download", async (req, res) => {
+  try {
+    const { buffer, contentType } = await downloadCommentAttachment(req.params.id, req.params.commentId, req.params.attId);
+    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(buffer);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
