@@ -23,6 +23,14 @@ import { feedbackMetrics } from "./feedback.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import {
+  ringcentralConfigured,
+  getMedia,
+  recordingPath,
+  voicemailAudioPath,
+  sendSms,
+  ringOut,
+} from "./ringcentral.js";
+import {
   authEnabled,
   checkPassword,
   isAuthed,
@@ -96,6 +104,7 @@ export function createApp() {
       gemini: geminiConfigured(),
       wix: wixConfigured(),
       shipstation: shipstationConfigured(),
+      ringcentral: ringcentralConfigured(),
     })
   );
 
@@ -247,6 +256,46 @@ export function createApp() {
   app.get("/api/wix/products", async (req, res) => {
     try {
       res.json({ products: await searchProducts(req.query.q || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ── RingCentral: media proxies + actions ──────────────────
+  app.get("/api/ringcentral/recording/:id", async (req, res) => {
+    try {
+      const { buffer, contentType } = await getMedia(recordingPath(req.params.id));
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(buffer);
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.get("/api/ringcentral/voicemail/:msgId/:attId", async (req, res) => {
+    try {
+      const { buffer, contentType } = await getMedia(voicemailAudioPath(req.params.msgId, req.params.attId));
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(buffer);
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.post("/api/ringcentral/sms", async (req, res) => {
+    try {
+      const { to, text } = req.body;
+      if (!to || !text?.trim()) return res.status(400).json({ error: "Missing recipient or text" });
+      res.json(await sendSms(to, text.trim()));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.post("/api/ringcentral/ringout", async (req, res) => {
+    try {
+      const { to, from } = req.body;
+      if (!to || !from) return res.status(400).json({ error: "Missing numbers" });
+      res.json(await ringOut(to, from));
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

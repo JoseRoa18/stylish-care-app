@@ -224,6 +224,16 @@ export async function listTickets({ limit = 25, statuses } = {}) {
   return all.slice(0, limit);
 }
 
+// The customer's phone number for a ticket (for RingCentral lookups).
+export async function getTicketPhone(ticketId) {
+  try {
+    const t = await zohoFetch(`/tickets/${ticketId}?include=contacts`);
+    return t?.phone || t?.contact?.phone || t?.contact?.mobile || null;
+  } catch {
+    return null;
+  }
+}
+
 // Update a ticket's status (Open | On Hold | Escalated | Closed | ...).
 export async function updateTicketStatus(ticketId, status) {
   if (!status) throw new Error("Missing status");

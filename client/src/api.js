@@ -67,6 +67,12 @@ export const api = {
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
   shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
+  phoneHistory: (id, phone) =>
+    req(`/tickets/${id}/phone-history${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`),
+  rcRecordingUrl: (id) => `/api/ringcentral/recording/${encodeURIComponent(id)}`,
+  rcVoicemailUrl: (msgId, attId) => `/api/ringcentral/voicemail/${encodeURIComponent(msgId)}/${encodeURIComponent(attId)}`,
+  rcSendSms: (to, text) => req(`/ringcentral/sms`, { method: "POST", body: JSON.stringify({ to, text }) }),
+  rcRingout: (to, from) => req(`/ringcentral/ringout`, { method: "POST", body: JSON.stringify({ to, from }) }),
   getSettings: () => req(`/tickets/settings`),
   saveSettings: (patch) => req(`/tickets/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   improveDraft: (id, draft) =>

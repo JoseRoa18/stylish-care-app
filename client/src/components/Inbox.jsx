@@ -700,6 +700,39 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     finally { setShipLoading(false); }
   };
 
+  // RingCentral: phone history (calls / voicemails / SMS) + actions
+  const [phoneHist, setPhoneHist] = useState(null);
+  const [phoneVal, setPhoneVal] = useState("");
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [smsText, setSmsText] = useState("");
+  const [smsSending, setSmsSending] = useState(false);
+  const loadPhone = async (override) => {
+    setPhoneLoading(true);
+    try {
+      const r = await api.phoneHistory(ticket.id, override || phoneVal);
+      setPhoneHist(r);
+      if (r.phone && !phoneVal) setPhoneVal(r.phone);
+    } catch { setPhoneHist({ calls: [], voicemails: [], sms: [] }); }
+    finally { setPhoneLoading(false); }
+  };
+  const sendSms = async () => {
+    if (!smsText.trim() || !phoneVal) return;
+    setSmsSending(true);
+    try { await api.rcSendSms(phoneVal, smsText); setSmsText(""); loadPhone(phoneVal); }
+    catch (e) { alert(`SMS failed: ${e.message}`); }
+    finally { setSmsSending(false); }
+  };
+  const callCustomer = async () => {
+    let from = localStorage.getItem("agentPhone");
+    if (!from) {
+      from = prompt("Your phone number (RingCentral rings it first, then connects to the customer):");
+      if (!from) return;
+      localStorage.setItem("agentPhone", from);
+    }
+    try { await api.rcRingout(phoneVal, from); alert("Calling… your phone should ring now."); }
+    catch (e) { alert(`Call failed: ${e.message}`); }
+  };
+
   // Wix store: customer orders + product lookup
   const [orders, setOrders] = useState(null);
   const [ordersExpanded, setOrdersExpanded] = useState(false);
@@ -778,6 +811,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     if (ticket.customerEmail)
       api.wixOrders(ticket.customerEmail).then((r) => setOrders(r.orders || [])).catch(() => setOrders([]));
     else setOrders([]);
+    // RingCentral phone history (auto by the ticket's phone)
+    api.phoneHistory(ticket.id).then((r) => { setPhoneHist(r); if (r.phone) setPhoneVal(r.phone); }).catch(() => {});
     try {
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
@@ -1085,6 +1120,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {/* ── ShipStation: shipments by order number (any channel) ── */}
           <ShipmentLookup
             q={shipQ} setQ={setShipQ} results={shipResults} loading={shipLoading} onSearch={() => searchShipment()}
+          />
+
+          {/* ── RingCentral: calls / voicemails / SMS ──────────── */}
+          <PhonePanel
+            hist={phoneHist} phoneVal={phoneVal} setPhoneVal={setPhoneVal} loading={phoneLoading}
+            onLookup={() => loadPhone(phoneVal)} onCall={callCustomer}
+            smsText={smsText} setSmsText={setSmsText} smsSending={smsSending} onSendSms={sendSms}
           />
 
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
@@ -1636,6 +1678,104 @@ function ShipmentCard({ s }) {
           {t.shipDate && <span style={{ color: "var(--ink-faint)" }}> · shipped {t.shipDate}</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+const CALL_COLOR = { Accepted: "#3b7a57", Missed: "#c0392b", Voicemail: "#c8912a", Rejected: "#c0392b", Busy: "#c8912a" };
+function fmtCallDur(s) {
+  if (!s) return "0s";
+  const m = Math.floor(s / 60);
+  return m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
+// RingCentral panel: phone history (calls + voicemails + SMS) + call/SMS actions.
+function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, smsText, setSmsText, smsSending, onSendSms }) {
+  const [open, setOpen] = useState(false);
+  const calls = hist?.calls || [], vms = hist?.voicemails || [], sms = hist?.sms || [];
+  const total = calls.length + vms.length + sms.length;
+  return (
+    <div style={{ margin: "10px 0 4px" }}>
+      <button className="btn sm" onClick={() => setOpen((v) => !v)}>
+        📞 Calls & SMS{total ? ` (${total})` : ""}{open ? " ▲" : ""}
+      </button>
+      {open && (
+        <div className="card" style={{ marginTop: 8, padding: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <input
+              className="field"
+              placeholder="Customer phone…"
+              value={phoneVal}
+              onChange={(e) => setPhoneVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onLookup()}
+              style={{ flex: "0 1 200px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+            />
+            <button className="btn sm" onClick={onLookup} disabled={loading || !phoneVal.trim()}>{loading ? <span className="spin" /> : "Look up"}</button>
+            <button className="btn sm" onClick={onCall} disabled={!phoneVal.trim()} title="RingOut — rings your phone, then connects">☎ Call</button>
+          </div>
+
+          {/* Calls */}
+          {calls.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 4 }}>Calls</div>
+              {calls.map((c) => (
+                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                  <span>{c.direction === "Inbound" ? "📥" : "📤"}</span>
+                  <span style={{ width: 96, color: "var(--ink-faint)" }}>{fmtDate(c.time)}</span>
+                  <Pill text={c.result} color={CALL_COLOR[c.result]} />
+                  <span style={{ color: "var(--ink-soft)" }}>{fmtCallDur(c.durationSec)}</span>
+                  {c.recordingId && <audio controls src={api.rcRecordingUrl(c.recordingId)} style={{ height: 30, marginLeft: "auto", maxWidth: 220 }} />}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Voicemails */}
+          {vms.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 4 }}>Voicemails</div>
+              {vms.map((v) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                  <span>🎙️</span>
+                  <span style={{ width: 96, color: "var(--ink-faint)" }}>{fmtDate(v.time)}</span>
+                  <span style={{ color: "var(--ink-soft)" }}>{v.durationSec ? `${v.durationSec}s` : ""}</span>
+                  {v.audioId && <audio controls src={api.rcVoicemailUrl(v.id, v.audioId)} style={{ height: 30, marginLeft: "auto", maxWidth: 220 }} />}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* SMS thread + send */}
+          <div>
+            <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 4 }}>SMS</div>
+            {sms.length > 0 ? (
+              <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                {sms.map((m) => (
+                  <div key={m.id} style={{ alignSelf: m.direction === "Outbound" ? "flex-end" : "flex-start", maxWidth: "80%", padding: "5px 9px", borderRadius: 8, fontSize: 12.5, background: m.direction === "Outbound" ? "#fbf7ee" : "#fff", border: "1px solid var(--line-soft)" }}>
+                    {m.text}
+                    <div style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 2 }}>{fmtTime(m.time)}</div>
+                  </div>
+                ))}
+              </div>
+            ) : <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>No SMS yet.</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="field"
+                placeholder="Send an SMS…"
+                value={smsText}
+                onChange={(e) => setSmsText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onSendSms()}
+                style={{ flex: 1, padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
+              />
+              <button className="btn sm primary" onClick={onSendSms} disabled={smsSending || !smsText.trim() || !phoneVal.trim()}>
+                {smsSending ? "…" : "Send"}
+              </button>
+            </div>
+          </div>
+
+          {total === 0 && !loading && <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 8 }}>No phone history for this number.</div>}
+        </div>
+      )}
     </div>
   );
 }

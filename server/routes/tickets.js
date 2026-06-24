@@ -18,8 +18,10 @@ import {
   fetchInlineImage,
   fetchConversationImages,
   mergeTickets,
+  getTicketPhone,
   zohoConfigured,
 } from "../zoho.js";
+import { getCallHistory, getVoicemails, getSms } from "../ringcentral.js";
 import { generateDraft, improveDraft } from "../gemini.js";
 import { getSettings, saveSettings, appendSignature } from "../settings.js";
 import { searchOrdersByEmail } from "../wix.js";
@@ -252,6 +254,23 @@ router.post(
     }
   }
 );
+
+// GET /api/tickets/:id/phone-history?phone= — RingCentral calls/voicemails/SMS
+// for the ticket's customer (phone auto-detected from Zoho, overridable).
+router.get("/:id/phone-history", async (req, res) => {
+  try {
+    const phone = req.query.phone || (await getTicketPhone(req.params.id)) || "";
+    if (!phone) return res.json({ phone: "", calls: [], voicemails: [], sms: [] });
+    const [calls, voicemails, sms] = await Promise.all([
+      getCallHistory(phone).catch(() => []),
+      getVoicemails(phone).catch(() => []),
+      getSms(phone).catch(() => []),
+    ]);
+    res.json({ phone, calls, voicemails, sms });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // GET /api/tickets/:id/related — other tickets from the same customer.
 router.get("/:id/related", async (req, res) => {
