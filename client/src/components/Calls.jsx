@@ -62,7 +62,6 @@ export default function Calls({ onOpenInbox }) {
               <div style={{ marginTop: 6 }}>
                 {calls.map((c) => (
                   <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line-soft)" }}>
-                    <span style={{ fontSize: 16 }}>{c.result === "Voicemail" ? "🎙️" : c.result === "Missed" ? "📵" : "📞"}</span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {c.fromName || c.fromNumber || "Unknown"}
@@ -78,7 +77,7 @@ export default function Calls({ onOpenInbox }) {
                       title="Find this caller in tickets"
                       onClick={() => onOpenInbox?.(c.fromName ? c.fromName.split(" - ").pop().trim() : c.fromNumber)}
                     >
-                      🔎
+                      Find
                     </button>
                   </div>
                 ))}
@@ -96,7 +95,6 @@ export default function Calls({ onOpenInbox }) {
                 {voicemails.map((v) => (
                   <div key={v.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--line-soft)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span>{v.unread ? "🔵" : "🎙️"}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.fromName || v.fromNumber}</div>
                         <div style={{ fontSize: 11, color: "var(--ink-faint)" }}><span className="mono">{v.fromNumber}</span> · {fmtTime(v.time)}{v.durationSec ? ` · ${v.durationSec}s` : ""}</div>

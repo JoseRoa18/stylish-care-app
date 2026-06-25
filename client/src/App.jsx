@@ -118,7 +118,7 @@ export default function App() {
             <i className="status-dot" style={dot(health.ringcentral)} /> RingCentral
           </span>
           <button className="btn sm" onClick={() => setSettingsOpen(true)} title="Settings (signature)" style={{ marginLeft: 4 }}>
-            ⚙
+            Settings
           </button>
           {auth.enabled && (
             <button className="btn sm" onClick={logout} title="Sign out">

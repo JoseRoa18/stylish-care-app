@@ -89,11 +89,11 @@ export default function Dashboard({ onOpenInbox }) {
       {data.callsPerDay?.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
           <div className="card">
-            <div className="chart-title">Incoming calls · last 7 days</div>
+            <div className="chart-title">Answered calls · last 7 days</div>
             <ColumnChart data={data.callsPerDay} color="#7a8b6f" />
           </div>
           <div className="card">
-            <div className="chart-title">Total volume · calls + tickets · last 7 days</div>
+            <div className="chart-title">Total volume · answered calls + tickets · last 7 days</div>
             <ColumnChart data={data.combinedPerDay} color="#a98b6a" />
           </div>
         </div>

@@ -113,15 +113,15 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {syncWarning && (
             <span style={{ fontSize: 12, color: "#c8912a" }} title={syncWarning}>
-              ⚠ Live sync delayed (showing last saved)
+              Live sync delayed (showing last saved)
             </span>
           )}
           <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
             {loading ? "Syncing…" : `Auto-syncs every 30s · last ${fetchedAt ? new Date(fetchedAt).toLocaleTimeString() : "—"}`}
           </span>
           <div className="seg">
-            <button className={layout === "split" ? "active" : ""} title="Peek view (list + side panel)" onClick={() => setLayout("split")}>◫ Peek</button>
-            <button className={layout === "list" ? "active" : ""} title="List view" onClick={() => setLayout("list")}>☰ List</button>
+            <button className={layout === "split" ? "active" : ""} title="Peek view (list + side panel)" onClick={() => setLayout("split")}>Peek</button>
+            <button className={layout === "list" ? "active" : ""} title="List view" onClick={() => setLayout("list")}>List</button>
           </div>
           <button className="btn sm" onClick={load}>↻ Refresh</button>
         </div>
@@ -297,7 +297,7 @@ function WaitTimer({ since, status }) {
   const color = hours < 4 ? "#3b7a57" : hours < 24 ? "#c8912a" : "#c0392b";
   return (
     <span className="wait" style={{ color, borderColor: color }} title={`Customer waiting since ${fmtTime(since)}`}>
-      ⏱ {fmtDuration(ms)}
+      {fmtDuration(ms)}
     </span>
   );
 }
@@ -409,7 +409,7 @@ function RichEditor({ docKey, initialHtml, disabled, onChange, onImagePaste }) {
             if (url) exec("createLink", url);
           }}
         >
-          🔗 Link
+          Link
         </button>
         {btn("✕ Clear", "removeFormat", "Clear formatting")}
       </div>
@@ -427,9 +427,9 @@ function RichEditor({ docKey, initialHtml, disabled, onChange, onImagePaste }) {
 
 // Triage lane → colors. Nothing auto-sends; this just guides the reviewer.
 const LANES = {
-  ready: { bg: "#e7f4ec", border: "#3b7a57", text: "#205038", icon: "✓" },
-  review: { bg: "#fdf4e3", border: "#c8912a", text: "#7a5712", icon: "⏿" },
-  sensitive: { bg: "#fdecec", border: "#c0392b", text: "#7a221a", icon: "⚠" },
+  ready: { bg: "#e7f4ec", border: "#3b7a57", text: "#205038", icon: "" },
+  review: { bg: "#fdf4e3", border: "#c8912a", text: "#7a5712", icon: "" },
+  sensitive: { bg: "#fdecec", border: "#c0392b", text: "#7a221a", icon: "" },
 };
 
 function LaneBanner({ triage }) {
@@ -981,7 +981,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             {ticket.customerEmail && <span>{ticket.customerEmail}</span>}
             {ticket.channel && <span>{ticket.channel}</span>}
             {ticket.createdTime && (
-              <span title={`Created ${fmtTime(ticket.createdTime)}`}>📅 {fmtDate(ticket.createdTime)}</span>
+              <span title={`Created ${fmtTime(ticket.createdTime)}`}>{fmtDate(ticket.createdTime)}</span>
             )}
             {ticket.modifiedTime && (
               <span title={`Last activity ${fmtTime(ticket.modifiedTime)}`}>· updated {ago(ticket.modifiedTime)}</span>
@@ -989,7 +989,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-          {sent && <span className="badge sent">✓ Sent</span>}
+          {sent && <span className="badge sent">Sent</span>}
           <WaitTimer since={ticket.customerResponseTime} status={status} />
           <StatusSelect status={status} options={statusOptions} onChange={changeStatus} saving={statusSaving} />
           {!/escalat/i.test(status) && (
@@ -1000,7 +1000,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               onClick={(e) => { e.stopPropagation(); changeStatus("Escalated"); }}
               style={{ color: "#c0392b", borderColor: "#e3b9b3" }}
             >
-              ⤴ Escalate
+              Escalate
             </button>
           )}
           <button
@@ -1009,7 +1009,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             disabled={acting}
             onClick={(e) => { e.stopPropagation(); actOn("spam"); }}
           >
-            🚫
+            Spam
           </button>
           <button
             className="btn sm"
@@ -1017,7 +1017,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             disabled={acting}
             onClick={(e) => { e.stopPropagation(); actOn("trash"); }}
           >
-            🗑
+            Delete
           </button>
         </div>
       </div>
@@ -1046,7 +1046,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 {ticket.webUrl && (
                   <a href={ticket.webUrl} target="_blank" rel="noreferrer">Open it in Zoho</a>
                 )}{" "}
-                to confirm — if it's empty there too, you can safely 🗑 delete or 🚫 spam it from here.
+                to confirm — if it's empty there too, you can safely delete or spam it from here.
               </div>
             </div>
           )}
@@ -1108,7 +1108,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6, cursor: orders.length > 2 ? "pointer" : "default", userSelect: "none" }}
                 onClick={() => orders.length > 2 && setOrdersExpanded((v) => !v)}
               >
-                🛒 Customer orders ({orders.length}){orders.length > 2 ? (ordersExpanded ? " ▲" : " ▾ show all") : ""}
+                Customer orders ({orders.length}){orders.length > 2 ? (ordersExpanded ? " ▲" : " ▾ show all") : ""}
               </div>
               {(ordersExpanded ? orders : orders.slice(0, 2)).map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
               {!ordersExpanded && orders.length > 2 && (
@@ -1137,7 +1137,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {/* ── private internal notes ───────────────────────── */}
           <div style={{ marginTop: 10 }}>
             <button className="btn sm" onClick={() => setNotesOpen((v) => !v)}>
-              🗒 Private notes{notes.length ? ` (${notes.length})` : ""}{notesOpen ? " ▲" : ""}
+              Private notes{notes.length ? ` (${notes.length})` : ""}{notesOpen ? " ▲" : ""}
             </button>
             {notesOpen && (
               <div className="card" style={{ marginTop: 8, padding: 12 }}>
@@ -1157,7 +1157,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                             const url = api.noteAttachmentUrl(ticket.id, n.id, a.id, a.name);
                             return IMAGE_RE.test(a.name || "")
                               ? <Thumb key={a.id} url={url} name={a.name} size={a.size} height={64} />
-                              : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>📄 {a.name}</a>;
+                              : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>{a.name}</a>;
                           })}
                         </div>
                       )}
@@ -1178,7 +1178,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <input ref={noteFileRef} type="file" multiple accept="image/*,application/pdf" style={{ display: "none" }} onChange={onPickNoteFiles} />
                     <button className="btn sm" disabled={noteUploading} onClick={() => noteFileRef.current?.click()} title="Attach an image/screenshot">
-                      {noteUploading ? "…" : "📎 Image"}
+                      {noteUploading ? "…" : "Image"}
                     </button>
                     <button className="btn sm primary" disabled={savingNote || (!noteText.trim() && !noteFiles.length)} onClick={addNote}>
                       {savingNote ? "Saving…" : "Add note"}
@@ -1189,7 +1189,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                     {noteFiles.map((f) => (
                       <span key={f.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 11 }}>
-                        📎 {f.name}
+                        {f.name}
                         <button type="button" onClick={() => setNoteFiles((prev) => prev.filter((x) => x.id !== f.id))} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, opacity: 0.6 }}>✕</button>
                       </span>
                     ))}
@@ -1202,7 +1202,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {/* ── merge with same-customer tickets (#10) ───────── */}
           <div style={{ marginTop: 10 }}>
             <button className="btn sm" onClick={openMerge}>
-              ⇄ Merge tickets{mergeOpen ? " ▲" : ""}
+              Merge tickets{mergeOpen ? " ▲" : ""}
             </button>
             {mergeOpen && (
               <div className="card" style={{ marginTop: 8, padding: 12 }}>
@@ -1247,16 +1247,16 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {!hasContent && !composing && !drafting && (
             <div className="draft-actions" style={{ marginTop: 14 }}>
               <button className="btn primary" onClick={generate} disabled={convoLoading}>
-                ✦ Generate reply with AI
+                Generate reply with AI
               </button>
               <button className="btn" onClick={() => setComposing(true)} disabled={convoLoading}>
-                ✍️ Write reply
+                Write reply
               </button>
               <button className="btn" onClick={forward} disabled={convoLoading} title="Forward this email to a colleague or supplier">
-                ↪ Forward
+                Forward
               </button>
               <button className="btn" onClick={toggleTemplates} disabled={convoLoading}>
-                📋 Templates
+                Templates
               </button>
               <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>AI uses the approved Knowledge Base.</span>
             </div>
@@ -1324,7 +1324,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     title={`Reset to ${ticket.customerEmail}`}
                     onClick={() => setToEmail(ticket.customerEmail || "")}
                   >
-                    ↺
+                    Reset
                   </button>
                 )}
               </div>
@@ -1362,9 +1362,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               {!sent && (
                 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                   <button className="btn sm" disabled={improving || xDraft} onClick={improveCurrentDraft} title="Polish tone & grammar without changing the facts">
-                    {improving ? <><span className="spin" /> Improving…</> : "✨ Improve with AI"}
+                    {improving ? <><span className="spin" /> Improving…</> : "Improve with AI"}
                   </button>
-                  <button className="btn sm" onClick={toggleTemplates}>📋 Templates</button>
+                  <button className="btn sm" onClick={toggleTemplates}>Templates</button>
                   {signature && (
                     <button
                       className="btn sm"
@@ -1374,7 +1374,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                         setDocKey((k) => k + 1);
                       }}
                     >
-                      ✍️ Signature
+                      Signature
                     </button>
                   )}
                   <span style={{ fontSize: 12, color: "var(--ink-faint)", marginLeft: 4 }}>Translate to:</span>
@@ -1398,7 +1398,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPickFiles} />
                 {!sent && (
                   <button className="btn sm" disabled={uploading || sending} onClick={() => fileInputRef.current?.click()}>
-                    {uploading ? <><span className="spin" /> Uploading…</> : "📎 Attach files"}
+                    {uploading ? <><span className="spin" /> Uploading…</> : "Attach files"}
                   </button>
                 )}
                 {outFiles.map((f) => (
@@ -1406,7 +1406,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     key={f.id}
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 12 }}
                   >
-                    📎 {f.name} <span style={{ color: "var(--ink-faint)" }}>{fmtBytes(f.size)}</span>
+                    {f.name} <span style={{ color: "var(--ink-faint)" }}>{fmtBytes(f.size)}</span>
                     {!sent && (
                       <button
                         type="button"
@@ -1434,8 +1434,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 )}
                 {sent && (
                   <>
-                    <span style={{ color: "var(--green)", fontSize: 13 }}>✓ Reply sent to {toEmail}</span>
-                    <button className="btn" onClick={resetCompose}>✍️ Write another reply</button>
+                    <span style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to {toEmail}</span>
+                    <button className="btn" onClick={resetCompose}>Write another reply</button>
                   </>
                 )}
               </div>
@@ -1524,7 +1524,7 @@ function Attachment({ url, name, size, thumbHeight = 74 }) {
     return (
       <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
         <video controls src={url} style={{ maxWidth: 260, maxHeight: 180, borderRadius: 8, border: "1px solid var(--line)", background: "#000" }} />
-        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>🎬 {name} · {fmtBytes(size)} {dl}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{name} · {fmtBytes(size)} {dl}</span>
       </span>
     );
   if (IMAGE_RE.test(name || ""))
@@ -1536,7 +1536,7 @@ function Attachment({ url, name, size, thumbHeight = 74 }) {
     );
   return (
     <span style={fileChipStyle}>
-      <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "var(--ink)" }}>📄 {name}</a>
+      <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "var(--ink)" }}>{name}</a>
       <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
       {dl}
     </span>
@@ -1557,7 +1557,7 @@ function Thumb({ url, name, size, height = 74 }) {
   if (failed)
     return (
       <a href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>
-        🖼 {name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
+        {name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
       </a>
     );
   return (
@@ -1590,7 +1590,7 @@ function AttachmentStrip({ ticketId, attachments }) {
   return (
     <div style={{ margin: "12px 0 4px" }}>
       <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>
-        📎 Attachments ({attachments.length})
+        Attachments ({attachments.length})
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {attachments.map((a) => (
@@ -1640,7 +1640,7 @@ function OrderCard({ order }) {
       </div>
       {order.tracking.map((t, i) => (
         <div key={i} style={{ fontSize: 12, marginTop: 4 }}>
-          📦 {t.carrier || "Tracking"}:{" "}
+          {t.carrier || "Tracking"}:{" "}
           {t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.number}</a> : <span className="mono">{t.number}</span>}
         </div>
       ))}
@@ -1676,7 +1676,7 @@ function ShipmentCard({ s }) {
       )}
       {s.tracking.map((t, i) => (
         <div key={i} style={{ fontSize: 12, marginTop: 4 }}>
-          📦 {t.carrier || "Tracking"}:{" "}
+          {t.carrier || "Tracking"}:{" "}
           {t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.number}</a> : <span className="mono">{t.number}</span>}
           {t.shipDate && <span style={{ color: "var(--ink-faint)" }}> · shipped {t.shipDate}</span>}
         </div>
@@ -1700,7 +1700,7 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
   return (
     <div style={{ margin: "10px 0 4px" }}>
       <button className="btn sm" onClick={() => setOpen((v) => !v)}>
-        📞 Calls & SMS{total ? ` (${total})` : ""}{open ? " ▲" : ""}
+        Calls & SMS{total ? ` (${total})` : ""}{open ? " ▲" : ""}
       </button>
       {open && (
         <div className="card" style={{ marginTop: 8, padding: 12 }}>
@@ -1714,7 +1714,7 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
               style={{ flex: "0 1 200px", padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13 }}
             />
             <button className="btn sm" onClick={onLookup} disabled={loading || !phoneVal.trim()}>{loading ? <span className="spin" /> : "Look up"}</button>
-            <button className="btn sm" onClick={onCall} disabled={!phoneVal.trim()} title="RingOut — rings your phone, then connects">☎ Call</button>
+            <button className="btn sm" onClick={onCall} disabled={!phoneVal.trim()} title="RingOut — rings your phone, then connects">Call</button>
           </div>
 
           {/* Calls */}
@@ -1723,7 +1723,7 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
               <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 4 }}>Calls</div>
               {calls.map((c) => (
                 <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
-                  <span>{c.direction === "Inbound" ? "📥" : "📤"}</span>
+                  <span>{c.direction === "Inbound" ? "" : ""}</span>
                   <span style={{ width: 96, color: "var(--ink-faint)" }}>{fmtDate(c.time)}</span>
                   <Pill text={c.result} color={CALL_COLOR[c.result]} />
                   <span style={{ color: "var(--ink-soft)" }}>{fmtCallDur(c.durationSec)}</span>
@@ -1739,7 +1739,7 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
               <div style={{ fontSize: 11, color: "var(--ink-faint)", marginBottom: 4 }}>Voicemails</div>
               {vms.map((v) => (
                 <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
-                  <span>🎙️</span>
+                  <span></span>
                   <span style={{ width: 96, color: "var(--ink-faint)" }}>{fmtDate(v.time)}</span>
                   <span style={{ color: "var(--ink-soft)" }}>{v.durationSec ? `${v.durationSec}s` : ""}</span>
                   {v.audioId && <audio controls src={api.rcVoicemailUrl(v.id, v.audioId)} style={{ height: 30, marginLeft: "auto", maxWidth: 220 }} />}
@@ -1787,7 +1787,7 @@ function ShipmentLookup({ q, setQ, results, loading, onSearch }) {
   return (
     <div style={{ margin: "10px 0 4px" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>📦 ShipStation</span>
+        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>ShipStation</span>
         <input
           className="field"
           placeholder="Track by order # (Amazon, Wayfair, direct…)"
@@ -1819,7 +1819,7 @@ function ProductLookup({ q, setQ, results, loading, onSearch }) {
       <div style={{ display: "flex", gap: 8 }}>
         <input
           className="field"
-          placeholder="🔎 Look up a product (e.g. K-131G)…"
+          placeholder="Look up a product (e.g. K-131G)…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onSearch()}

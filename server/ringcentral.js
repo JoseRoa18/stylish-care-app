@@ -95,7 +95,9 @@ export async function getRecentCalls({ days = 7, limit = 50 } = {}) {
   }));
 }
 
-// Inbound calls grouped by day (UTC) for the dashboard → { "2026-06-19": 21 }.
+// Inbound ANSWERED calls grouped by day (UTC) for the dashboard — excludes
+// missed calls, voicemails and rejected/hung-up calls. → { "2026-06-19": 14 }.
+const ANSWERED_RESULTS = new Set(["Accepted", "Call connected"]);
 export async function getCallsPerDay({ days = 7 } = {}) {
   if (!ringcentralConfigured()) return {};
   const dateFrom = ISO(days);
@@ -105,6 +107,7 @@ export async function getCallsPerDay({ days = 7 } = {}) {
       `/restapi/v1.0/account/~/call-log?direction=Inbound&perPage=1000&page=${page}&dateFrom=${dateFrom}`
     ).catch(() => ({ records: [] }));
     for (const r of data.records || []) {
+      if (!ANSWERED_RESULTS.has(r.result)) continue; // answered only
       const d = (r.startTime || "").slice(0, 10);
       if (d) out[d] = (out[d] || 0) + 1;
     }
