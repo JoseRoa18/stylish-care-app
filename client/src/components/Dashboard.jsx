@@ -90,11 +90,11 @@ export default function Dashboard({ onOpenInbox }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
           <div className="card">
             <div className="chart-title">📞 Incoming calls · last 7 days</div>
-            <ColumnChart data={data.callsPerDay} color="#3b7a57" />
+            <ColumnChart data={data.callsPerDay} color="#7a8b6f" />
           </div>
           <div className="card">
             <div className="chart-title">Total volume · calls + tickets · last 7 days</div>
-            <ColumnChart data={data.combinedPerDay} color="#7a5cff" />
+            <ColumnChart data={data.combinedPerDay} color="#a98b6a" />
           </div>
         </div>
       )}
