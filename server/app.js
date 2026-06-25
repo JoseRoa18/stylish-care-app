@@ -31,6 +31,7 @@ import {
   ringOut,
   getRecentCalls,
   getRecentVoicemails,
+  getCallsPerDay,
 } from "./ringcentral.js";
 import {
   authEnabled,
@@ -206,10 +207,16 @@ export function createApp() {
         .filter((ms) => ms >= 0);
       const openAvgWaitMs = waits.length ? waits.reduce((s, x) => s + x, 0) / waits.length : null;
       const openOldestWaitMs = waits.length ? Math.max(...waits) : null;
-      const perDay = (perDayRows.data || []).map((r) => ({
-        label: new Date(r.day + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        count: Number(r.count),
-      }));
+      const lbl = (day) => new Date(day + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const perDay = (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: Number(r.count) }));
+      // RingCentral inbound calls per day, aligned to the same 7 days
+      const callsByDay = ringcentralConfigured() ? await getCallsPerDay({ days: 7 }).catch(() => ({})) : null;
+      const callsPerDay = callsByDay
+        ? (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: callsByDay[r.day] || 0 }))
+        : null;
+      const combinedPerDay = callsByDay
+        ? (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: Number(r.count) + (callsByDay[r.day] || 0) }))
+        : null;
 
       // weekly avg resolution (last 8 weeks) — computed in JS, no migration
       const weeksBack = 8;
@@ -238,6 +245,8 @@ export function createApp() {
         avgResolutionMs: round(m.avgResolutionMs),
         resolvedSample: m.resolvedSample || 0,
         perDay,
+        callsPerDay,
+        combinedPerDay,
         resolutionByWeek,
         lastFetch: new Date().toISOString(),
         error: null,

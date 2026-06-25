@@ -85,6 +85,20 @@ export default function Dashboard({ onOpenInbox }) {
         <ColumnChart data={data.perDay || []} />
       </div>
 
+      {/* ── RingCentral: calls + combined volume ─────────── */}
+      {data.callsPerDay?.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+          <div className="card">
+            <div className="chart-title">📞 Incoming calls · last 7 days</div>
+            <ColumnChart data={data.callsPerDay} color="#3b7a57" />
+          </div>
+          <div className="card">
+            <div className="chart-title">Total volume · calls + tickets · last 7 days</div>
+            <ColumnChart data={data.combinedPerDay} color="#7a5cff" />
+          </div>
+        </div>
+      )}
+
       {/* ── weekly resolution ────────────────────────────── */}
       {data.resolutionByWeek?.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
@@ -237,7 +251,7 @@ function WeeklyResolution({ data }) {
   );
 }
 
-function ColumnChart({ data }) {
+function ColumnChart({ data, color = "var(--brass)" }) {
   const max = Math.max(1, ...data.map((d) => d.count));
   return (
     <>
@@ -245,7 +259,7 @@ function ColumnChart({ data }) {
         {data.map((d, i) => (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center" }}>
             {d.count > 0 && <span style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 3 }}>{d.count}</span>}
-            <div style={{ width: "62%", maxWidth: 40, background: "var(--brass)", borderRadius: "4px 4px 0 0", height: `${Math.max((d.count / max) * 72, 2)}px` }} />
+            <div style={{ width: "62%", maxWidth: 40, background: color, borderRadius: "4px 4px 0 0", height: `${Math.max((d.count / max) * 72, 2)}px` }} />
           </div>
         ))}
       </div>

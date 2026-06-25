@@ -95,6 +95,24 @@ export async function getRecentCalls({ days = 7, limit = 50 } = {}) {
   }));
 }
 
+// Inbound calls grouped by day (UTC) for the dashboard → { "2026-06-19": 21 }.
+export async function getCallsPerDay({ days = 7 } = {}) {
+  if (!ringcentralConfigured()) return {};
+  const dateFrom = ISO(days);
+  const out = {};
+  for (let page = 1; page <= 10; page++) {
+    const data = await rcGet(
+      `/restapi/v1.0/account/~/call-log?direction=Inbound&perPage=1000&page=${page}&dateFrom=${dateFrom}`
+    ).catch(() => ({ records: [] }));
+    for (const r of data.records || []) {
+      const d = (r.startTime || "").slice(0, 10);
+      if (d) out[d] = (out[d] || 0) + 1;
+    }
+    if (!data.navigation?.nextPageId && (data.records || []).length < 1000) break;
+  }
+  return out;
+}
+
 export async function getRecentVoicemails({ days = 21, limit = 40 } = {}) {
   if (!ringcentralConfigured()) return [];
   const data = await rcGet(
