@@ -30,6 +30,8 @@ export const api = {
   inbox: ({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) =>
     req(`/inbox?view=${encodeURIComponent(view)}&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}&sort=${sort}`),
   tickets: () => req("/tickets"),
+  createTicket: (payload) =>
+    req(`/tickets/create`, { method: "POST", body: JSON.stringify(payload) }),
   conversation: (id) => req(`/tickets/${id}/conversation`),
   draft: (id, ticket) =>
     req(`/tickets/${id}/draft`, {

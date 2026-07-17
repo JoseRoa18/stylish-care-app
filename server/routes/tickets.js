@@ -19,8 +19,10 @@ import {
   fetchConversationImages,
   mergeTickets,
   getTicketPhone,
+  createTicket,
   zohoConfigured,
 } from "../zoho.js";
+import { upsertTickets } from "../tickets-sync.js";
 import { getCallHistory, getVoicemails, getSms } from "../ringcentral.js";
 import { generateDraft, improveDraft } from "../gemini.js";
 import { getSettings, saveSettings, appendSignature } from "../settings.js";
@@ -83,6 +85,20 @@ router.post("/:id/draft", async (req, res) => {
       conversation,
       usedKb: kb.map((a) => ({ id: a.id, title: a.title, source: a.source, score: a._score })),
     });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/tickets/create — open a new ticket from the app.
+router.post("/create", async (req, res) => {
+  try {
+    const { subject, description, email, name, phone, channel } = req.body;
+    if (!subject?.trim()) return res.status(400).json({ error: "Missing subject" });
+    const ticket = await createTicket({ subject, description, email, name, phone, channel });
+    // show up in the inbox list immediately (don't wait for the next sync)
+    try { await upsertTickets([ticket]); } catch { /* next sync adds it */ }
+    res.json({ ok: true, ticket });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

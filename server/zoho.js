@@ -224,6 +224,35 @@ export async function listTickets({ limit = 25, statuses } = {}) {
   return all.slice(0, limit);
 }
 
+// Create a new ticket (the team logs phone/walk-in requests themselves).
+export async function createTicket({ subject, description, email, name, phone, channel = "Phone" }) {
+  if (!subject?.trim()) throw new Error("Missing subject");
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  const contact = {};
+  if (parts.length > 1) { contact.firstName = parts[0]; contact.lastName = parts.slice(1).join(" "); }
+  else contact.lastName = parts[0] || (email ? email.split("@")[0] : "Customer");
+  if (email?.trim()) contact.email = email.trim();
+  if (phone?.trim()) contact.phone = phone.trim();
+  const t = await zohoFetch(`/tickets`, {
+    method: "POST",
+    body: JSON.stringify({
+      subject: subject.trim(),
+      departmentId: ZOHO_DEPARTMENT_ID,
+      channel,
+      status: "Open",
+      contact,
+      description: description?.trim() || undefined,
+    }),
+  });
+  // the create response omits the contact — fill from what the agent entered
+  const ticket = normalizeTicket(t);
+  if ((!ticket.customerName || ticket.customerName === "Customer") && (name || email)) {
+    ticket.customerName = String(name || "").trim() || String(email).split("@")[0];
+  }
+  if (!ticket.customerEmail && email?.trim()) ticket.customerEmail = email.trim();
+  return ticket;
+}
+
 // The customer's phone number for a ticket (for RingCentral lookups).
 export async function getTicketPhone(ticketId) {
   try {

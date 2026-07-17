@@ -34,6 +34,19 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
 
   const [view, setView] = useState("open");
   const [sort, setSort] = useState("updated");
+  const [newOpen, setNewOpen] = useState(false);
+
+  // prune auto-saved drafts older than 14 days
+  useEffect(() => {
+    try {
+      const cutoff = Date.now() - 14 * 86400000;
+      for (const k of Object.keys(localStorage)) {
+        if (!k.startsWith("draft:")) continue;
+        const v = JSON.parse(localStorage.getItem(k) || "null");
+        if (!v?.at || v.at < cutoff) localStorage.removeItem(k);
+      }
+    } catch { /* ignore */ }
+  }, []);
   const [layout, setLayout] = useState(() => localStorage.getItem("inboxLayout") || "split");
   useEffect(() => { localStorage.setItem("inboxLayout", layout); }, [layout]);
   const [search, setSearch] = useState("");
@@ -124,6 +137,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
             <button className={layout === "list" ? "active" : ""} title="List view" onClick={() => setLayout("list")}>List</button>
           </div>
           <button className="btn sm" onClick={load}>↻ Refresh</button>
+          <button className="btn sm primary" onClick={() => setNewOpen(true)}>+ New ticket</button>
         </div>
       </div>
 
@@ -230,6 +244,13 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
       )}
 
       <Lightbox />
+
+      {newOpen && (
+        <NewTicketModal
+          onClose={() => setNewOpen(false)}
+          onCreated={(t) => { setNewOpen(false); load(); if (t?.id) setOpenId(t.id); }}
+        />
+      )}
 
       {/* ── pagination ─────────────────────────────────────── */}
       {total > pageSize && (
@@ -468,6 +489,67 @@ function StatusSelect({ status, options = [], onChange, saving }) {
   );
 }
 
+// Create a new ticket by hand (phone/walk-in requests the team logs itself).
+function NewTicketModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", channel: "Phone", subject: "", description: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const inputStyle = { width: "100%", padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, boxSizing: "border-box" };
+  const submit = async () => {
+    if (!form.subject.trim()) { setErr("Subject is required."); return; }
+    if (!form.name.trim() && !form.email.trim()) { setErr("Enter at least the customer's name or email."); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await api.createTicket(form);
+      onCreated?.(r.ticket);
+    } catch (e) {
+      setErr(e.message);
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="lightbox" onClick={onClose} style={{ alignItems: "flex-start", paddingTop: "7vh" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 540, padding: 22, cursor: "default" }}>
+        <h3 style={{ margin: "0 0 12px" }}>New ticket</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Customer name
+            <input value={form.name} onChange={set("name")} style={inputStyle} placeholder="Jane Smith" />
+          </label>
+          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Email
+            <input type="email" value={form.email} onChange={set("email")} style={inputStyle} placeholder="jane@example.com" />
+          </label>
+          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Phone (optional)
+            <input value={form.phone} onChange={set("phone")} style={inputStyle} placeholder="+1 555 123 4567" />
+          </label>
+          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Channel
+            <select value={form.channel} onChange={set("channel")} style={inputStyle}>
+              <option>Phone</option>
+              <option>Email</option>
+              <option>Web</option>
+              <option>Chat</option>
+            </select>
+          </label>
+        </div>
+        <label style={{ display: "block", fontSize: 12, color: "var(--ink-soft)", marginTop: 10 }}>Subject *
+          <input value={form.subject} onChange={set("subject")} style={inputStyle} placeholder="e.g. Missing strainer for S-823 sink" />
+        </label>
+        <label style={{ display: "block", fontSize: 12, color: "var(--ink-soft)", marginTop: 10 }}>Description
+          <textarea rows={4} value={form.description} onChange={set("description")} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} placeholder="What the customer reported / asked for…" />
+        </label>
+        {err && <div className="banner error" style={{ marginTop: 10 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={saving}>
+            {saving ? <><span className="spin" /> Creating…</> : "Create ticket"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Compact row for the peek (split) view — click to open the ticket on the right.
 function CompactRow({ ticket, selected, onClick }) {
   return (
@@ -673,6 +755,41 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       setXDraft(false);
     }
   };
+
+  // ── auto-save the reply draft per ticket ─────────────────
+  // Saved to localStorage while typing; restored when the ticket is reopened;
+  // cleared on a successful send. Nothing typed is ever lost by navigating away.
+  const draftKey = `draft:${ticket.id}`;
+  const [draftRestored, setDraftRestored] = useState(false);
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!open || restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const saved = JSON.parse(localStorage.getItem(draftKey) || "null");
+      if (saved?.html && !draftHtml.replace(/<[^>]*>/g, "").trim()) {
+        setDraftHtml(saved.html);
+        if (saved.to) setToEmail(saved.to);
+        if (saved.cc) setCc(saved.cc);
+        setComposing(true);
+        setDocKey((k) => k + 1);
+        setDraftRestored(true);
+      }
+    } catch { /* ignore */ }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (sent) return;
+    const id = setTimeout(() => {
+      try {
+        if (draftHtml.replace(/<[^>]*>/g, "").trim()) {
+          localStorage.setItem(draftKey, JSON.stringify({ html: draftHtml, to: toEmail, cc, at: Date.now() }));
+        } else {
+          localStorage.removeItem(draftKey);
+        }
+      } catch { /* storage full — skip */ }
+    }, 800);
+    return () => clearTimeout(id);
+  }, [draftHtml, toEmail, cc, sent, draftKey]);
 
   // Reset the compose area for a fresh reply (used after a send + "write reply")
   const resetCompose = () => {
@@ -939,6 +1056,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       );
       setSent(true);
       setComposing(false);
+      try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
       // refresh the thread so the reply we just sent shows up immediately
       setConvoLoaded(false);
       loadConversation();
@@ -1307,6 +1425,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {(hasContent || composing) && (
             <>
               {triage && <LaneBanner triage={triage} />}
+              {draftRestored && !sent && (
+                <div style={{ fontSize: 12, color: "var(--amber)", margin: "8px 0 4px" }}>
+                  Restored your unsent draft — it auto-saves while you type.
+                </div>
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 8px" }}>
                 <label style={{ fontSize: 13, color: "var(--ink-soft)", flexShrink: 0 }}>To:</label>
                 <input
