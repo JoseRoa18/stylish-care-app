@@ -20,6 +20,7 @@ import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 import { feedbackMetrics } from "./feedback.js";
+import { answerVisitorChat } from "./chatbot.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./wayfair.js";
@@ -131,6 +132,47 @@ export function createApp() {
       res.json({ ok: true, pinged: "tickets", count: count ?? null, at: new Date().toISOString() });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // ── Zoho SalesIQ (website chat bot) webhook ────────────────
+  // PUBLIC: SalesIQ's Zobot posts each visitor message here and replies with
+  // what our AI answers. Protected by a shared token in the URL. The bot
+  // "forwards" (hands off to a human operator) whenever the AI escalates.
+  app.post("/api/salesiq/webhook", async (req, res) => {
+    if (!process.env.SALESIQ_WEBHOOK_TOKEN || req.query.token !== process.env.SALESIQ_WEBHOOK_TOKEN) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      const b = req.body || {};
+      const handler = b.handler || b.operation || "message";
+      const visitor = b.visitor || {};
+      const convId =
+        visitor.active_conversation_id || b.chat?.id || b.conversation_id || visitor.uuid || visitor.id || "anon";
+      // greeting when the bot is triggered (visitor just opened the chat)
+      if (handler === "trigger") {
+        const name = (visitor.name || "").trim();
+        return res.json({
+          action: "reply",
+          replies: [
+            `Hi${name && !/^visitor/i.test(name) ? ` ${name.split(" ")[0]}` : ""}! Welcome to Stylish Customer Care. How can I help you today?`,
+          ],
+        });
+      }
+      const text =
+        (typeof b.message === "string" ? b.message : b.message?.text) || visitor.question || "";
+      const { reply, escalate } = await answerVisitorChat({
+        convId: String(convId),
+        question: text,
+        visitorName: visitor.name,
+      });
+      res.json({ action: escalate ? "forward" : "reply", replies: [reply] });
+    } catch (err) {
+      // never leave a visitor hanging — hand off to a human on any failure
+      res.json({
+        action: "forward",
+        replies: ["Let me connect you with our team so they can help you with that."],
+      });
     }
   });
 
