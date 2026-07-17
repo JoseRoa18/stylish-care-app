@@ -65,6 +65,7 @@ export const api = {
   merge: (id, ids) =>
     req(`/tickets/${id}/merge`, { method: "POST", body: JSON.stringify({ ids }) }),
   feedbackMetrics: (days = 90) => req(`/feedback/metrics?days=${days}`),
+  resolutionMetric: (period = "all") => req(`/metrics/resolution?period=${encodeURIComponent(period)}`),
   templates: () => req(`/templates`),
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),

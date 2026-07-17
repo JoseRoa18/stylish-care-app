@@ -351,6 +351,41 @@ export function createApp() {
     }
   });
 
+  // Avg resolution for a selectable window: all | 30d | 90d | year:2026 …
+  app.get("/api/metrics/resolution", async (req, res) => {
+    try {
+      const p = String(req.query.period || "all");
+      let from = null, to = null;
+      if (/^\d+d$/.test(p)) from = new Date(Date.now() - parseInt(p, 10) * 86400000);
+      else if (/^year:\d{4}$/.test(p)) {
+        const y = parseInt(p.slice(5), 10);
+        from = new Date(Date.UTC(y, 0, 1));
+        to = new Date(Date.UTC(y + 1, 0, 1));
+      }
+      let sum = 0, n = 0;
+      for (let off = 0; ; off += 1000) {
+        let q = supabase
+          .from("tickets")
+          .select("created_time,closed_time")
+          .ilike("status", "%closed%")
+          .not("closed_time", "is", null)
+          .range(off, off + 999);
+        if (from) q = q.gte("closed_time", from.toISOString());
+        if (to) q = q.lt("closed_time", to.toISOString());
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        for (const r of data || []) {
+          const ms = new Date(r.closed_time) - new Date(r.created_time);
+          if (ms >= 0) { sum += ms; n++; }
+        }
+        if (!data || data.length < 1000) break;
+      }
+      res.json({ period: p, avgMs: n ? Math.round(sum / n) : null, count: n });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   app.get("/api/feedback/metrics", async (req, res) => {
     try {
       const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));

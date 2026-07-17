@@ -63,7 +63,7 @@ export default function Dashboard({ onOpenInbox }) {
           sub={`incl. escalated · ${data.active} active total · ${data.closed} closed`}
         />
         <Metric label="Avg wait (open)" value={fmtDuration(data.avgWaitMs)} color={waitColor(data.avgWaitMs)} sub={`open + escalated · oldest ${fmtDuration(data.oldestWaitMs)}`} />
-        <Metric label="Avg resolution" value={fmtDuration(data.avgResolutionMs)} sub={`over ${data.resolvedSample || 0} closed tickets`} />
+        <AvgResolutionCard defaultAvgMs={data.avgResolutionMs} defaultCount={data.resolvedSample || 0} />
         <Metric label="KB articles" value={data.kbArticles} />
       </div>
 
@@ -186,6 +186,51 @@ function AiQuality({ fb }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Avg resolution with a selectable window (all time, 30/90 days, or a year).
+function AvgResolutionCard({ defaultAvgMs, defaultCount }) {
+  const [period, setPeriod] = useState("all");
+  const [val, setVal] = useState({ avgMs: defaultAvgMs, count: defaultCount });
+  const [loading, setLoading] = useState(false);
+
+  const years = [];
+  for (let y = new Date().getFullYear(); y >= 2023; y--) years.push(y);
+
+  const change = async (p) => {
+    setPeriod(p);
+    if (p === "all") { setVal({ avgMs: defaultAvgMs, count: defaultCount }); return; }
+    setLoading(true);
+    try {
+      const r = await api.resolutionMetric(p);
+      setVal({ avgMs: r.avgMs, count: r.count });
+    } catch { /* keep last */ }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="card metric">
+      <div className="label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+        <span>Avg resolution</span>
+        <select
+          value={period}
+          onChange={(e) => change(e.target.value)}
+          style={{ fontSize: 11, padding: "2px 4px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--card)", color: "var(--ink-soft)", cursor: "pointer", textTransform: "none", letterSpacing: 0 }}
+        >
+          <option value="all">All time</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+          {years.map((y) => <option key={y} value={`year:${y}`}>{y}</option>)}
+        </select>
+      </div>
+      <div className="value" style={{ opacity: loading ? 0.4 : 1 }}>
+        {val.avgMs != null ? fmtDuration(val.avgMs) : "—"}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 4 }}>
+        {loading ? "calculating…" : `over ${val.count || 0} closed tickets`}
+      </div>
     </div>
   );
 }
