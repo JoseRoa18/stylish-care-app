@@ -807,6 +807,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // ticket attachments (#7)
   const [attachments, setAttachments] = useState([]);
 
+  // Wayfair: PO details auto-loaded from CS/CA numbers in the ticket
+  const [wayfairPos, setWayfairPos] = useState(null);
+
   // ShipStation: shipment lookup by order number (any channel)
   const [shipResults, setShipResults] = useState(null);
   const [shipQ, setShipQ] = useState("");
@@ -948,6 +951,10 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       if (nums.length) {
         Promise.all(nums.slice(0, 2).map((n) => api.shipOrder(n).then((r) => r.orders || []).catch(() => [])))
           .then((arr) => { const flat = arr.flat(); if (flat.length) setShipResults(flat); });
+        const wfNums = nums.filter((n) => /^C[AS]\d{6,}$/i.test(n));
+        if (wfNums.length) {
+          api.wayfairPo(wfNums).then((r) => { if (r.pos?.length) setWayfairPos(r.pos); }).catch(() => {});
+        }
       }
     } catch (e) {
       setConvoError(e.message);
@@ -1587,6 +1594,12 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             <ShipmentLookup
               q={shipQ} setQ={setShipQ} results={shipResults} loading={shipLoading} onSearch={() => searchShipment()}
             />
+            {wayfairPos && wayfairPos.length > 0 && (
+              <div style={{ margin: "10px 0 4px" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>Wayfair PO ({wayfairPos.length})</div>
+                {wayfairPos.map((p) => <WayfairCard key={p.poNumber} po={p} />)}
+              </div>
+            )}
             <PhonePanel
               hist={phoneHist} phoneVal={phoneVal} setPhoneVal={setPhoneVal} loading={phoneLoading}
               onLookup={() => loadPhone(phoneVal)} onCall={callCustomer}
@@ -1932,6 +1945,27 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
           {total === 0 && !loading && <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 8 }}>No phone history for this number.</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+// Wayfair dropship PO details (auto-loaded from PO numbers found in the ticket).
+function WayfairCard({ po }) {
+  return (
+    <div className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="mono" style={{ fontWeight: 700 }}>#{po.poNumber}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{po.channel}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{po.date}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>
+        {po.products.map((x) => `${x.partNumber}${x.qty > 1 ? ` ×${x.qty}` : ""}${x.cancelled ? " (cancelled)" : ""}`).join(" · ")}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 4 }}>
+        {po.estimatedShipDate && <>Est. ship {po.estimatedShipDate}</>}
+        {po.carrier && <> · {po.carrier}</>}
+        {po.warehouse && <> · from {po.warehouse}</>}
+      </div>
     </div>
   );
 }

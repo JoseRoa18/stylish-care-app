@@ -70,6 +70,7 @@ export const api = {
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
   shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
+  wayfairPo: (numbers) => req(`/wayfair/po?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   phoneHistory: (id, phone) =>
     req(`/tickets/${id}/phone-history${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`),
   rcRecordingUrl: (id) => `/api/ringcentral/recording/${encodeURIComponent(id)}`,

@@ -22,6 +22,7 @@ import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 import { feedbackMetrics } from "./feedback.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
+import { wayfairConfigured, lookupWayfairPos } from "./wayfair.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -108,6 +109,7 @@ export function createApp() {
       wix: wixConfigured(),
       shipstation: shipstationConfigured(),
       ringcentral: ringcentralConfigured(),
+      wayfair: wayfairConfigured(),
     })
   );
 
@@ -330,6 +332,16 @@ export function createApp() {
   app.get("/api/shipstation/order", async (req, res) => {
     try {
       res.json({ orders: await lookupOrder(req.query.number || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Wayfair — look up dropship PO(s) by number.
+  app.get("/api/wayfair/po", async (req, res) => {
+    try {
+      const nums = String(req.query.numbers || req.query.number || "").split(",");
+      res.json({ pos: await lookupWayfairPos(nums) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

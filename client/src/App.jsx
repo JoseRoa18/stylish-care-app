@@ -117,6 +117,9 @@ export default function App() {
           <span>
             <i className="status-dot" style={dot(health.ringcentral)} /> RingCentral
           </span>
+          <span>
+            <i className="status-dot" style={dot(health.wayfair)} /> Wayfair
+          </span>
           <button className="btn sm" onClick={() => setSettingsOpen(true)} title="Settings (signature)" style={{ marginLeft: 4 }}>
             Settings
           </button>

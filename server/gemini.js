@@ -6,6 +6,7 @@
 
 import { ordersToText } from "./wix.js";
 import { shipmentsToText } from "./shipstation.js";
+import { wayfairToText } from "./wayfair.js";
 
 const { GEMINI_API_KEY, GEMINI_MODEL } = process.env;
 const MODEL = GEMINI_MODEL || "gemini-3.1-pro-preview";
@@ -61,7 +62,7 @@ ACCURACY (never sacrifice this for tone):
 - Articles tagged "source: resolved-ticket" are generalized summaries of how the team actually handled similar PAST cases ("Situation … / How we resolved it …"). Use them as REFERENCE for the right approach, policy and tone for this kind of case — never copy them, and never assume this customer's specifics match the past case (the summaries are anonymized and carry no real names, orders or amounts).
 - Do NOT assert regulatory or compliance claims (e.g. "lead-free", NSF/ANSI, cUPC, certifications) unless those exact claims appear in the Knowledge Base. If a customer asks about them and the KB doesn't confirm, treat it as not covered and escalate.
 - CUSTOMER PHOTOS: when the customer's attached photos are included with this request, look at them and use what is CLEARLY visible to tailor the reply (identify the product/part, acknowledge what they show — it reassures the customer that their photos were reviewed). Observations are context only: never draw a definitive fault/cause/defect conclusion from a photo alone, and never promise an outcome based on it — the formal review still applies (see WARRANTY below).
-- CUSTOMER ORDERS: a "CUSTOMER ORDERS (from store)" section may list this customer's real direct-store orders, and a "SHIPMENTS (ShipStation)" section may list orders matched by number across all channels (Amazon, Wayfair, Home Depot, etc.) with their shipment status, carrier and tracking. Use them to answer order/shipping questions precisely — confirm the order number, status, what shipped, and share the tracking number/carrier when present. Only use entries whose details clearly match what the customer is asking about; if none match, don't guess — ask which order they mean. Never invent an order number, tracking number or status that isn't in these sections.
+- CUSTOMER ORDERS: a "CUSTOMER ORDERS (from store)" section may list this customer's real direct-store orders, a "SHIPMENTS (ShipStation)" section may list orders matched by number across all channels (Amazon, Wayfair, Home Depot, etc.) with their shipment status, carrier and tracking, and a "WAYFAIR PURCHASE ORDERS" section may show the Wayfair-side details of a PO (items, estimated ship date, carrier, warehouse). Use them to answer order/shipping questions precisely — confirm the order number, status, what shipped, and share the tracking number/carrier when present. Only use entries whose details clearly match what the customer is asking about; if none match, don't guess — ask which order they mean. Never invent an order number, tracking number or status that isn't in these sections.
 - ANSWER THE LATEST MESSAGE: build your reply around the customer's MOST RECENT message and what it actually asks for — not an earlier point in the thread that has since been resolved or superseded.
 - RECONCILE the specifics the customer gives against the order/shipment data. If they mention an order number, find it. If they reference a tracking number, compare it to the tracking on their orders: when it doesn't match any of their shipments, say so plainly and give the correct tracking from the data (e.g. "The number you mentioned doesn't match your orders — it may be a typo; your [items] shipped on order #X under [carrier] [tracking].").
 - A "FULFILLED"/"shipped" status means the order was DISPATCHED — not a guarantee every item physically arrived. Respect what the thread and the customer establish: if a human agent or the customer says a specific item is still missing, backordered, or didn't arrive, treat that as true and honor it, even if the order shows fulfilled. Use the data to help (confirm what tracking covers which items), never to contradict a real issue the customer is reporting.
@@ -229,7 +230,7 @@ export async function improveDraft({ draft }) {
   return { reply: reply.trim() || src };
 }
 
-export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [] }) {
+export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [] }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");
   }
@@ -240,6 +241,9 @@ export async function generateDraft({ ticket, conversation, kb, images = [], ord
   const shipBlock = shipments.length
     ? `\n=== SHIPMENTS (ShipStation) ===\n${shipmentsToText(shipments)}\n`
     : "";
+  const wayfairBlock = wayfairPos.length
+    ? `\n=== WAYFAIR PURCHASE ORDERS ===\n${wayfairToText(wayfairPos)}\n`
+    : "";
 
   const userContent = `Customer: ${ticket.customerName} <${ticket.customerEmail}>
 Subject: ${ticket.subject}
@@ -247,7 +251,7 @@ Channel: ${ticket.channel || "Email"}
 
 === CONVERSATION (oldest first) ===
 ${conversationToText(conversation)}
-${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}
+${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}
 === APPROVED KNOWLEDGE BASE ===
 ${kbToText(kb)}
 
