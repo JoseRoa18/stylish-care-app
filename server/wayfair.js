@@ -99,8 +99,7 @@ export async function getRecentCancellations({ days = 14 } = {}) {
   if (!wayfairConfigured()) return { poCount: 0, cancellations: [] };
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const data = await gql(
-    `query ($from: String!) { getDropshipPurchaseOrders(limit: 200, fromDate: $from, sortOrder: DESC) { ${PO_FIELDS} } }`,
-    { from: fromDate }
+    `query { getDropshipPurchaseOrders(limit: 200, fromDate: "${fromDate}", sortOrder: DESC) { ${PO_FIELDS} } }`
   ).catch(() => null);
   const pos = (data?.getDropshipPurchaseOrders || []).map(normalizePo);
   const cancellations = pos
