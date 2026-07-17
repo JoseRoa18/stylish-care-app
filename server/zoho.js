@@ -360,6 +360,8 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
         id: th.id,
         direction: full.direction || th.direction, // "in" | "out"
         from: full.fromEmailAddress || th.fromEmailAddress || "",
+        to: full.to || "",
+        cc: full.cc || "",
         author: full.author?.name || th.author?.name || "",
         createdTime: full.createdTime || th.createdTime,
         text: stripQuoted(full.plainText || full.summary || th.summary || ""),

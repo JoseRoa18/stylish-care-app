@@ -208,3 +208,17 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .peek-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 11.5px; color: var(--ink-faint); }
 .peek-cust { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 920px) { .peek { flex-direction: column; } .peek-list { flex-basis: auto; width: 100%; max-height: 320px; } .peek-detail { position: static; } }
+
+/* ── ticket detail: main + right context sidebar ─────────── */
+.ticket-cols { display: flex; gap: 18px; align-items: flex-start; }
+.ticket-main { flex: 1 1 0; min-width: 0; }
+.ticket-side { flex: 0 0 300px; min-width: 0; margin-top: 14px; padding-left: 16px; border-left: 1px solid var(--line-soft); }
+.ticket-side .card { padding: 10px 12px; }
+@media (max-width: 1100px) {
+  .ticket-cols { flex-direction: column; }
+  .ticket-side { flex-basis: auto; width: 100%; border-left: none; padding-left: 0; margin-top: 4px; }
+}
+
+/* internal note bubble in the conversation */
+.msg.note-msg { align-self: stretch; max-width: 100%; background: var(--amber-soft); border-color: #e4d5ab; }
+.msg.note-msg .who { color: var(--amber); }

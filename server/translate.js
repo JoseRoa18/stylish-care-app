@@ -72,7 +72,10 @@ export async function translateTexts(texts, target = "English") {
 
   const prompt = `Translate each item of the following JSON array into ${target}.
 Return ONLY a JSON array of the translated strings, in the same order and the same length.
-If an item is already in ${target}, return it unchanged. Preserve URLs, model numbers and names verbatim.
+Rules:
+- If an item is already in ${target}, return it unchanged.
+- Preserve URLs, email addresses, model numbers, order numbers and names verbatim.
+- CRITICAL: keep each item's internal structure EXACTLY — every line break (\\n) stays where it is, paragraphs stay separate, list items stay on their own lines, greetings and signatures stay on their own lines. Translate the words only; never reflow, merge or reorder lines.
 
 ${JSON.stringify(list)}`;
 

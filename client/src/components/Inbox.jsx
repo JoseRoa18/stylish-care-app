@@ -758,10 +758,10 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   const [notesOpen, setNotesOpen] = useState(false);
   const [noteFiles, setNoteFiles] = useState([]); // images/files to attach to the note
   const [noteUploading, setNoteUploading] = useState(false);
+  const [noteDrag, setNoteDrag] = useState(false);
   const noteFileRef = useRef(null);
-  const onPickNoteFiles = async (e) => {
-    const files = [...(e.target.files || [])];
-    e.target.value = "";
+  const uploadNoteFiles = async (fileList) => {
+    const files = [...(fileList || [])];
     if (!files.length) return;
     setNoteUploading(true);
     for (const f of files) {
@@ -769,6 +769,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       catch (err) { alert(`Could not attach ${f.name}: ${err.message}`); }
     }
     setNoteUploading(false);
+  };
+  const onPickNoteFiles = (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = "";
+    uploadNoteFiles(files);
   };
   const addNote = async () => {
     if (!noteText.trim() && !noteFiles.length) return;
@@ -1051,6 +1056,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             </div>
           )}
 
+          <div className="ticket-cols">
+          <div className="ticket-main">
           {conversation && conversation.length > 0 && (
             <>
               <div className="convo-bar">
@@ -1070,103 +1077,95 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 </div>
               </div>
               <div className="convo">
-                {conversation.length > 3 && !showAllMsgs && (
-                  <button className="btn sm" onClick={() => setShowAllMsgs(true)} style={{ alignSelf: "center" }}>
-                    ▾ Show {conversation.length - 3} earlier message{conversation.length - 3 === 1 ? "" : "s"}
-                  </button>
-                )}
-                {conversation.map((m, i) => {
-                  if (!showAllMsgs && conversation.length > 3 && i < conversation.length - 3) return null;
-                  const txt = view !== "orig" && xcache[view] ? xcache[view][i] : m.text;
+                {(() => {
+                  // conversation + internal notes interleaved chronologically
+                  const timeline = [
+                    ...conversation.map((m, i) => ({ kind: "msg", m, i, t: m.createdTime || "" })),
+                    ...notes.map((n) => ({ kind: "note", n, t: n.createdTime || "" })),
+                  ].sort((a, b) => (a.t > b.t ? 1 : -1));
+                  const hidden = !showAllMsgs && timeline.length > 4 ? timeline.length - 4 : 0;
                   return (
-                    <div key={m.id} className={`msg ${m.direction === "out" ? "out" : "in"}`}>
-                      <div className="who">
-                        <span>{m.direction === "out" ? "Agent" : "Customer"}{m.author ? ` · ${m.author}` : ""}</span>
-                        {m.createdTime && <span className="when">{fmtTime(m.createdTime)}</span>}
-                      </div>
-                      <div className="text">
-                        {view === "orig" && m.html ? (
-                          <EmailHtml html={m.html} />
-                        ) : txt ? (
-                          linkifyNodes(txt)
-                        ) : (
-                          "(no text)"
-                        )}
-                      </div>
-                      <MessageAttachments ticketId={ticket.id} threadId={m.id} attachments={m.attachments} />
-                    </div>
+                    <>
+                      {hidden > 0 && (
+                        <button className="btn sm" onClick={() => setShowAllMsgs(true)} style={{ alignSelf: "center" }}>
+                          ▾ Show {hidden} earlier item{hidden === 1 ? "" : "s"}
+                        </button>
+                      )}
+                      {timeline.slice(hidden).map((it) => {
+                        if (it.kind === "note") {
+                          const n = it.n;
+                          const noteText = (n.content || "").replace(/<[^>]+>/g, " ").trim();
+                          return (
+                            <div key={"note-" + n.id} className="msg note-msg">
+                              <div className="who">
+                                <span>Internal note{n.author ? ` · ${n.author}` : ""}</span>
+                                {n.createdTime && <span className="when">{fmtTime(n.createdTime)}</span>}
+                              </div>
+                              {noteText && <div className="text">{noteText}</div>}
+                              {n.attachments?.length > 0 && (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                                  {n.attachments.map((a) => {
+                                    const url = api.noteAttachmentUrl(ticket.id, n.id, a.id, a.name);
+                                    return IMAGE_RE.test(a.name || "")
+                                      ? <Thumb key={a.id} url={url} name={a.name} size={a.size} height={64} />
+                                      : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>{a.name}</a>;
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        const m = it.m;
+                        const txt = view !== "orig" && xcache[view] ? xcache[view][it.i] : m.text;
+                        return (
+                          <div key={m.id} className={`msg ${m.direction === "out" ? "out" : "in"}`}>
+                            <div className="who">
+                              <span>{m.direction === "out" ? "Agent" : "Customer"}{m.author ? ` · ${m.author}` : ""}</span>
+                              {m.createdTime && <span className="when">{fmtTime(m.createdTime)}</span>}
+                            </div>
+                            {m.cc && (
+                              <div style={{ fontSize: 10.5, color: "var(--ink-faint)", margin: "-2px 0 5px" }}>
+                                Cc: {m.cc.replace(/"/g, "")}
+                              </div>
+                            )}
+                            <div className="text">
+                              {view === "orig" && m.html ? (
+                                <EmailHtml html={m.html} />
+                              ) : txt ? (
+                                linkifyNodes(txt)
+                              ) : (
+                                "(no text)"
+                              )}
+                            </div>
+                            <MessageAttachments ticketId={ticket.id} threadId={m.id} attachments={m.attachments} />
+                          </div>
+                        );
+                      })}
+                    </>
                   );
-                })}
+                })()}
               </div>
             </>
           )}
 
-          {/* ── Wix store: customer orders + product lookup ──── */}
-          {orders && orders.length > 0 && (
-            <div style={{ margin: "12px 0 4px" }}>
-              <div
-                style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6, cursor: orders.length > 2 ? "pointer" : "default", userSelect: "none" }}
-                onClick={() => orders.length > 2 && setOrdersExpanded((v) => !v)}
-              >
-                Customer orders ({orders.length}){orders.length > 2 ? (ordersExpanded ? " ▲" : " ▾ show all") : ""}
-              </div>
-              {(ordersExpanded ? orders : orders.slice(0, 2)).map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
-              {!ordersExpanded && orders.length > 2 && (
-                <button className="btn sm" onClick={() => setOrdersExpanded(true)}>+ {orders.length - 2} more orders</button>
-              )}
-            </div>
-          )}
-          <ProductLookup
-            q={prodQ} setQ={setProdQ} results={prodResults} loading={prodLoading} onSearch={lookupProducts}
-          />
-
-          {/* ── ShipStation: shipments by order number (any channel) ── */}
-          <ShipmentLookup
-            q={shipQ} setQ={setShipQ} results={shipResults} loading={shipLoading} onSearch={() => searchShipment()}
-          />
-
-          {/* ── RingCentral: calls / voicemails / SMS ──────────── */}
-          <PhonePanel
-            hist={phoneHist} phoneVal={phoneVal} setPhoneVal={setPhoneVal} loading={phoneLoading}
-            onLookup={() => loadPhone(phoneVal)} onCall={callCustomer}
-            smsText={smsText} setSmsText={setSmsText} smsSending={smsSending} onSendSms={sendSms}
-          />
-
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
 
-          {/* ── private internal notes ───────────────────────── */}
+          {/* ── add internal note (notes themselves show in the thread) ── */}
           <div style={{ marginTop: 10 }}>
             <button className="btn sm" onClick={() => setNotesOpen((v) => !v)}>
-              Private notes{notes.length ? ` (${notes.length})` : ""}{notesOpen ? " ▲" : ""}
+              Add internal note{notes.length ? ` (${notes.length})` : ""}{notesOpen ? " ▲" : ""}
             </button>
             {notesOpen && (
-              <div className="card" style={{ marginTop: 8, padding: 12 }}>
-                {notes.length === 0 && (
-                  <div style={{ fontSize: 13, color: "var(--ink-faint)", marginBottom: 8 }}>
-                    No internal notes yet. These are private — the customer never sees them.
-                  </div>
-                )}
-                {notes.map((n) => {
-                  const text = (n.content || "").replace(/<[^>]+>/g, " ").trim();
-                  return (
-                    <div key={n.id} style={{ borderLeft: "3px solid var(--amber)", paddingLeft: 10, margin: "8px 0", fontSize: 13 }}>
-                      {text && <div style={{ whiteSpace: "pre-wrap" }}>{text}</div>}
-                      {n.attachments?.length > 0 && (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                          {n.attachments.map((a) => {
-                            const url = api.noteAttachmentUrl(ticket.id, n.id, a.id, a.name);
-                            return IMAGE_RE.test(a.name || "")
-                              ? <Thumb key={a.id} url={url} name={a.name} size={a.size} height={64} />
-                              : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>{a.name}</a>;
-                          })}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2 }}>
-                        {n.author || "Agent"} · {fmtTime(n.createdTime)}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div
+                className="card"
+                style={{ marginTop: 8, padding: 12, outline: noteDrag ? "2px dashed var(--amber)" : "none", outlineOffset: 2 }}
+                onDragOver={(e) => { e.preventDefault(); setNoteDrag(true); }}
+                onDragLeave={() => setNoteDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setNoteDrag(false); if (e.dataTransfer?.files?.length) uploadNoteFiles(e.dataTransfer.files); }}
+              >
+                <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>
+                  Private — the customer never sees notes. Drop images here or use the Image button.
+                </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <textarea
                     rows={2}
@@ -1441,6 +1440,37 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               </div>
             </>
           )}
+          </div>
+
+          {/* ── right context sidebar: orders / product / shipping / phone ── */}
+          <aside className="ticket-side">
+            {orders && orders.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <div
+                  style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6, cursor: orders.length > 2 ? "pointer" : "default", userSelect: "none" }}
+                  onClick={() => orders.length > 2 && setOrdersExpanded((v) => !v)}
+                >
+                  Customer orders ({orders.length}){orders.length > 2 ? (ordersExpanded ? " ▲" : " ▾ show all") : ""}
+                </div>
+                {(ordersExpanded ? orders : orders.slice(0, 2)).map((o) => <OrderCard key={o.siteId + o.number} order={o} />)}
+                {!ordersExpanded && orders.length > 2 && (
+                  <button className="btn sm" onClick={() => setOrdersExpanded(true)}>+ {orders.length - 2} more orders</button>
+                )}
+              </div>
+            )}
+            <ProductLookup
+              q={prodQ} setQ={setProdQ} results={prodResults} loading={prodLoading} onSearch={lookupProducts}
+            />
+            <ShipmentLookup
+              q={shipQ} setQ={setShipQ} results={shipResults} loading={shipLoading} onSearch={() => searchShipment()}
+            />
+            <PhonePanel
+              hist={phoneHist} phoneVal={phoneVal} setPhoneVal={setPhoneVal} loading={phoneLoading}
+              onLookup={() => loadPhone(phoneVal)} onCall={callCustomer}
+              smsText={smsText} setSmsText={setSmsText} smsSending={smsSending} onSendSms={sendSms}
+            />
+          </aside>
+          </div>
         </div>
       )}
     </div>
