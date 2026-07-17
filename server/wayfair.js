@@ -93,6 +93,27 @@ export async function lookupWayfairPos(poNumbers) {
   return (data?.getDropshipPurchaseOrders || []).map(normalizePo);
 }
 
+// Recent POs with cancelled items (Wayfair's orderCancellations query 500s
+// server-side, so we derive cancellations from the PO feed's isCancelled).
+export async function getRecentCancellations({ days = 14 } = {}) {
+  if (!wayfairConfigured()) return { poCount: 0, cancellations: [] };
+  const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const data = await gql(
+    `query ($from: String!) { getDropshipPurchaseOrders(limit: 200, fromDate: $from, sortOrder: DESC) { ${PO_FIELDS} } }`,
+    { from: fromDate }
+  ).catch(() => null);
+  const pos = (data?.getDropshipPurchaseOrders || []).map(normalizePo);
+  const cancellations = pos
+    .filter((p) => p.products.some((x) => x.cancelled))
+    .map((p) => ({
+      poNumber: p.poNumber,
+      date: p.date,
+      customer: p.customer,
+      items: p.products.filter((x) => x.cancelled).map((x) => x.partNumber),
+    }));
+  return { poCount: pos.length, cancellations };
+}
+
 // Compact text block for the AI prompt.
 export function wayfairToText(pos) {
   if (!pos.length) return "";

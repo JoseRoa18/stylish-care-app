@@ -25,12 +25,14 @@ function waitColor(ms) {
 export default function Dashboard({ onOpenInbox }) {
   const [data, setData] = useState(null);
   const [fb, setFb] = useState(null);
+  const [wf, setWf] = useState(null);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     const load = () => {
       api.dashboard().then(setData).catch((e) => setErr(e.message));
       api.feedbackMetrics(90).then(setFb).catch(() => {});
+      api.wayfairCancellations(14).then(setWf).catch(() => {});
     };
     load();
     const id = setInterval(load, 30000);
@@ -104,6 +106,29 @@ export default function Dashboard({ onOpenInbox }) {
         <div className="card" style={{ marginTop: 16 }}>
           <div className="chart-title">Avg resolution · by week (last 8 weeks)</div>
           <WeeklyResolution data={data.resolutionByWeek} />
+        </div>
+      )}
+
+      {/* ── Wayfair: recent volume + cancellations ───────── */}
+      {wf && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="chart-title">
+            Wayfair · last {wf.days} days — {wf.poCount} POs · {wf.cancellations?.length || 0} with cancelled items
+          </div>
+          {(wf.cancellations || []).length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>No cancellations in this window.</div>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              {wf.cancellations.map((c) => (
+                <div key={c.poNumber} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line-soft)", fontSize: 13 }}>
+                  <span className="mono" style={{ fontWeight: 600 }}>#{c.poNumber}</span>
+                  <span style={{ color: "var(--ink-soft)" }}>{c.customer || ""}</span>
+                  <span style={{ color: "var(--red)" }}>{c.items.join(", ")} cancelled</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-faint)" }}>{c.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

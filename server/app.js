@@ -22,7 +22,7 @@ import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
 import { feedbackMetrics } from "./feedback.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
-import { wayfairConfigured, lookupWayfairPos } from "./wayfair.js";
+import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./wayfair.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -332,6 +332,16 @@ export function createApp() {
   app.get("/api/shipstation/order", async (req, res) => {
     try {
       res.json({ orders: await lookupOrder(req.query.number || "") });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Wayfair — recent PO volume + cancellations for the dashboard.
+  app.get("/api/wayfair/cancellations", async (req, res) => {
+    try {
+      const days = Math.min(30, Math.max(3, Number(req.query.days) || 14));
+      res.json({ days, ...(await getRecentCancellations({ days })) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
