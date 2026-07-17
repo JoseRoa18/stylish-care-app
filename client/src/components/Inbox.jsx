@@ -1955,7 +1955,7 @@ function WayfairCard({ po }) {
     <div className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="mono" style={{ fontWeight: 700 }}>#{po.poNumber}</span>
-        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{po.channel}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{po.channel}{po.region ? ` ${po.region}` : ""}</span>
         <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{po.date}</span>
       </div>
       <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>

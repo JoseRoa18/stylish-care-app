@@ -122,6 +122,7 @@ export default function Dashboard({ onOpenInbox }) {
               {wf.cancellations.map((c) => (
                 <div key={c.poNumber} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line-soft)", fontSize: 13 }}>
                   <span className="mono" style={{ fontWeight: 600 }}>#{c.poNumber}</span>
+                  {c.region && <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{c.region}</span>}
                   <span style={{ color: "var(--ink-soft)" }}>{c.customer || ""}</span>
                   <span style={{ color: "var(--red)" }}>{c.items.join(", ")} cancelled</span>
                   <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-faint)" }}>{c.date}</span>

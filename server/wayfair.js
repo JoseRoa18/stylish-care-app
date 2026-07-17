@@ -8,37 +8,46 @@
 // for care (PO status/products/carrier are real). When a Production app is
 // approved, set WAYFAIR_ENV=production and it switches over.
 
-const { WAYFAIR_CLIENT_ID, WAYFAIR_CLIENT_SECRET } = process.env;
+// Wayfair applications are tied to ONE supplier account, so US and Canada are
+// separate credentials. US uses WAYFAIR_CLIENT_ID/SECRET (original vars);
+// Canada plugs in via WAYFAIR_CA_CLIENT_ID/SECRET when its app exists.
+const ACCOUNTS = [
+  { region: "US", id: process.env.WAYFAIR_CLIENT_ID, secret: process.env.WAYFAIR_CLIENT_SECRET },
+  { region: "CA", id: process.env.WAYFAIR_CA_CLIENT_ID, secret: process.env.WAYFAIR_CA_CLIENT_SECRET },
+].filter((a) => a.id && a.secret);
+
 const ENV = (process.env.WAYFAIR_ENV || "sandbox").toLowerCase();
 const API_HOST = ENV === "production" ? "https://api.wayfair.com" : "https://sandbox.api.wayfair.com";
 
 export function wayfairConfigured() {
-  return Boolean(WAYFAIR_CLIENT_ID && WAYFAIR_CLIENT_SECRET);
+  return ACCOUNTS.length > 0;
 }
 
-let _token = null; // { value, exp }
-async function getToken() {
-  if (_token && _token.exp - 60_000 > Date.now()) return _token.value;
+const _tokens = new Map(); // region → { value, exp }
+async function getToken(acc) {
+  const cached = _tokens.get(acc.region);
+  if (cached && cached.exp - 60_000 > Date.now()) return cached.value;
   const res = await fetch("https://sso.auth.wayfair.com/oauth/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       grant_type: "client_credentials",
-      client_id: WAYFAIR_CLIENT_ID,
-      client_secret: WAYFAIR_CLIENT_SECRET,
+      client_id: acc.id,
+      client_secret: acc.secret,
       audience: `${API_HOST}/`,
     }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.access_token) {
-    throw new Error(`Wayfair auth failed (${res.status}): ${j.error_description || j.error || "unknown"}`);
+    throw new Error(`Wayfair ${acc.region} auth failed (${res.status}): ${j.error_description || j.error || "unknown"}`);
   }
-  _token = { value: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
-  return _token.value;
+  const tok = { value: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
+  _tokens.set(acc.region, tok);
+  return tok.value;
 }
 
-async function gql(query, variables) {
-  const token = await getToken();
+async function gql(acc, query, variables) {
+  const token = await getToken(acc);
   const res = await fetch(`${API_HOST}/v1/graphql`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -46,15 +55,16 @@ async function gql(query, variables) {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || j.errors) {
-    throw new Error(`Wayfair ${res.status}: ${j.errors?.[0]?.message || "error"}`);
+    throw new Error(`Wayfair ${acc.region} ${res.status}: ${j.errors?.[0]?.message || "error"}`);
   }
   return j.data;
 }
 
 const CARRIERS = { FDEG: "FedEx Ground", FEDEX: "FedEx", UPSN: "UPS", UPS: "UPS", USPS: "USPS", XPOL: "XPO", RBTW: "R+L", ODFL: "Old Dominion" };
 
-function normalizePo(po) {
+function normalizePo(po, region) {
   return {
+    region,
     poNumber: po.poNumber,
     date: (po.poDate || "").slice(0, 10),
     estimatedShipDate: (po.estimatedShipDate || "").slice(0, 10) || null,
@@ -81,16 +91,21 @@ const PO_FIELDS = `
   products { partNumber name quantity price isCancelled }
 `;
 
-// Look up specific Wayfair PO numbers (e.g. from a ticket's subject/body).
+// Look up specific Wayfair PO numbers (e.g. from a ticket's subject/body)
+// across every configured region.
 export async function lookupWayfairPos(poNumbers) {
   if (!wayfairConfigured()) return [];
   const nums = [...new Set((poNumbers || []).map((n) => String(n).trim().toUpperCase()).filter((n) => /^C[AS]\d{6,}$/.test(n)))].slice(0, 4);
   if (!nums.length) return [];
-  const data = await gql(
-    `query ($nums: [String!]) { getDropshipPurchaseOrders(poNumbers: $nums, limit: 10) { ${PO_FIELDS} } }`,
-    { nums }
-  ).catch(() => null);
-  return (data?.getDropshipPurchaseOrders || []).map(normalizePo);
+  const list = nums.map((n) => `"${n}"`).join(",");
+  const results = await Promise.all(
+    ACCOUNTS.map((acc) =>
+      gql(acc, `query { getDropshipPurchaseOrders(poNumbers: [${list}], limit: 10) { ${PO_FIELDS} } }`)
+        .then((d) => (d?.getDropshipPurchaseOrders || []).map((p) => normalizePo(p, acc.region)))
+        .catch(() => [])
+    )
+  );
+  return results.flat();
 }
 
 // Recent POs with cancelled items (Wayfair's orderCancellations query 500s
@@ -98,14 +113,20 @@ export async function lookupWayfairPos(poNumbers) {
 export async function getRecentCancellations({ days = 14 } = {}) {
   if (!wayfairConfigured()) return { poCount: 0, cancellations: [] };
   const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const data = await gql(
-    `query { getDropshipPurchaseOrders(limit: 200, fromDate: "${fromDate}", sortOrder: DESC) { ${PO_FIELDS} } }`
-  ).catch(() => null);
-  const pos = (data?.getDropshipPurchaseOrders || []).map(normalizePo);
+  const results = await Promise.all(
+    ACCOUNTS.map((acc) =>
+      gql(acc, `query { getDropshipPurchaseOrders(limit: 200, fromDate: "${fromDate}", sortOrder: DESC) { ${PO_FIELDS} } }`)
+        .then((d) => (d?.getDropshipPurchaseOrders || []).map((p) => normalizePo(p, acc.region)))
+        .catch(() => [])
+    )
+  );
+  const pos = results.flat();
   const cancellations = pos
     .filter((p) => p.products.some((x) => x.cancelled))
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
     .map((p) => ({
       poNumber: p.poNumber,
+      region: p.region,
       date: p.date,
       customer: p.customer,
       items: p.products.filter((x) => x.cancelled).map((x) => x.partNumber),
