@@ -190,10 +190,29 @@ export function createApp() {
     }
     try {
       const b = req.body || {};
-      const name = String(b.name || b.contactName || "").trim();
-      const email = String(b.email || b.contactEmail || "").trim().toLowerCase();
-      const message = String(b.message || b.text || b.body || "").trim();
-      if (!message) return res.json({ ok: true, skipped: "empty message" });
+      // deep-scan helper: find the first string value under any of these keys,
+      // wherever Wix nests it ("Entire payload" shapes vary by trigger)
+      const dig = (obj, keys, depth = 0) => {
+        if (!obj || typeof obj !== "object" || depth > 5) return "";
+        for (const [k, v] of Object.entries(obj)) {
+          if (keys.some((key) => k.toLowerCase().includes(key)) && typeof v === "string" && v.trim()) return v.trim();
+        }
+        for (const v of Object.values(obj)) {
+          const hit = dig(v, keys, depth + 1);
+          if (hit) return hit;
+        }
+        return "";
+      };
+      const name = String(b.name || b.contactName || dig(b, ["name"]) || "").trim();
+      const email = String(b.email || b.contactEmail || dig(b, ["email"]) || "").trim().toLowerCase();
+      const message = String(b.message || b.text || b.body || dig(b, ["message", "text", "content"]) || "").trim();
+      if (!message) {
+        // stash the raw payload so we can inspect the shape and adapt
+        try {
+          await supabase.from("app_state").upsert({ key: "wix_last_webhook", value: b, updated_at: new Date().toISOString() });
+        } catch { /* debug aid only */ }
+        return res.json({ ok: true, skipped: "empty message" });
+      }
 
       // recent open website-chat ticket from this visitor? append instead of duplicating
       let appended = false;
