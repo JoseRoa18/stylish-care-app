@@ -72,6 +72,8 @@ export const api = {
   shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
   wayfairPo: (numbers) => req(`/wayfair/po?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   wayfairCancellations: (days = 14) => req(`/wayfair/cancellations?days=${days}`),
+  wixChat: (email, text) =>
+    req(`/wix/chat`, { method: "POST", body: JSON.stringify({ email, text }) }),
   phoneHistory: (id, phone) =>
     req(`/tickets/${id}/phone-history${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`),
   rcRecordingUrl: (id) => `/api/ringcentral/recording/${encodeURIComponent(id)}`,

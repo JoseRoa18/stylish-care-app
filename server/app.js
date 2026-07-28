@@ -24,6 +24,7 @@ import { answerVisitorChat } from "./chatbot.js";
 import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./wayfair.js";
+import { sendChatMessage } from "./wix.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -398,6 +399,16 @@ export function createApp() {
     try {
       const days = Math.min(30, Math.max(3, Number(req.query.days) || 14));
       res.json({ days, ...(await getRecentCancellations({ days })) });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Wix Inbox — send a reply INTO the website chat by the visitor's email.
+  app.post("/api/wix/chat", async (req, res) => {
+    try {
+      const { email, text } = req.body;
+      res.json(await sendChatMessage(email, text));
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

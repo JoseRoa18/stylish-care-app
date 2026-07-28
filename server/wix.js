@@ -174,6 +174,48 @@ export async function searchProducts(query, { perSite = 4 } = {}) {
   });
 }
 
+// ── Wix Inbox: reply INTO the website chat ───────────────────
+// Finds the visitor's Wix contact by email (checking each storefront), gets or
+// creates their Inbox conversation, and sends the message — it appears in the
+// site's chat bubble, and Wix emails the visitor if they've left the site.
+export async function sendChatMessage(email, text) {
+  if (!wixConfigured()) throw new Error("Wix is not configured");
+  const addr = String(email || "").trim().toLowerCase();
+  const msg = String(text || "").trim();
+  if (!addr || !msg) throw new Error("Missing email or message");
+
+  let lastErr = null;
+  for (const site of SITES) {
+    if (!site.id) continue;
+    try {
+      // 1) contact by email on this site
+      const cq = await wixPost(site.id, "https://www.wixapis.com/contacts/v4/contacts/query", {
+        query: { filter: { "primaryInfo.email": { $eq: addr } }, paging: { limit: 1 } },
+      });
+      const contactId = cq.contacts?.[0]?.id;
+      if (!contactId) continue;
+      // 2) their conversation (created if new)
+      const conv = await wixPost(site.id, "https://www.wixapis.com/inbox/v2/conversations", {
+        participantId: { contactId },
+      });
+      const convId = conv.conversation?.id;
+      if (!convId) continue;
+      // 3) send into the chat
+      await wixPost(site.id, `https://www.wixapis.com/inbox/v2/messages?conversationId=${convId}`, {
+        message: {
+          direction: "BUSINESS_TO_PARTICIPANT",
+          visibility: "BUSINESS_AND_PARTICIPANT",
+          content: { basic: { items: [{ text: msg }] } },
+        },
+      });
+      return { ok: true, site: site.name };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(lastErr ? `Wix chat send failed: ${lastErr.message}` : `No Wix contact found for ${addr}`);
+}
+
 // Compact text block of a customer's orders for the AI prompt.
 export function ordersToText(orders) {
   if (!orders.length) return "";

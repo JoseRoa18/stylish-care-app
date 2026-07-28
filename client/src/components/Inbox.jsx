@@ -706,6 +706,23 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   const [composing, setComposing] = useState(false); // manual / new reply mode
   const [improving, setImproving] = useState(false);
   const [xDraft, setXDraft] = useState(false); // translating the draft
+  const [chatSending, setChatSending] = useState(false);
+  const [chatSent, setChatSent] = useState(null);
+  const sendAsWebsiteChat = async () => {
+    const plain = draftHtml.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    if (!plain || !toEmail.trim()) return;
+    if (!confirm(`Send this reply into the WEBSITE CHAT for ${toEmail}?\n\nIt appears in the site's chat bubble (Wix also emails them if they left).`)) return;
+    setChatSending(true);
+    setSendError(null);
+    try {
+      const r = await api.wixChat(toEmail.trim(), plain);
+      setChatSent(r.site || "Wix");
+    } catch (e) {
+      setSendError(`Website chat failed: ${e.message}`);
+    } finally {
+      setChatSending(false);
+    }
+  };
 
   // reply templates panel
   const [templates, setTemplates] = useState(null);
@@ -1568,6 +1585,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     {drafting ? "Regenerating…" : "↻ Regenerate"}
                   </button>
                 )}
+                {!sent && (
+                  <button
+                    className="btn"
+                    onClick={sendAsWebsiteChat}
+                    disabled={chatSending || sending || !hasContent}
+                    title="Send this reply into the Wix website chat instead of email"
+                  >
+                    {chatSending ? <><span className="spin" /> Sending…</> : "Send as website chat"}
+                  </button>
+                )}
+                {chatSent && <span style={{ color: "var(--green)", fontSize: 13 }}>Sent to website chat ({chatSent})</span>}
                 {sent && (
                   <>
                     <span style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to {toEmail}</span>
