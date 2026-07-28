@@ -1295,8 +1295,15 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                   <textarea
                     rows={2}
                     value={noteText}
-                    placeholder="Add a private note (internal only)…"
+                    placeholder="Add a private note (internal only)… paste a screenshot to attach it"
                     onChange={(e) => setNoteText(e.target.value)}
+                    onPaste={(e) => {
+                      const imgs = [...(e.clipboardData?.items || [])]
+                        .filter((it) => it.kind === "file" && (it.type || "").startsWith("image/"))
+                        .map((it) => it.getAsFile())
+                        .filter(Boolean);
+                      if (imgs.length) { e.preventDefault(); uploadNoteFiles(imgs); }
+                    }}
                     style={{ flex: 1, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
                   />
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

@@ -224,6 +224,22 @@ export async function listTickets({ limit = 25, statuses } = {}) {
   return all.slice(0, limit);
 }
 
+// Content-aware ticket search via Zoho's search API — finds keywords INSIDE
+// the email bodies (order numbers, product names, phrases the customer wrote),
+// which the local metadata search can't see. Requires Desk.search.READ.
+export async function searchTicketsContent(q, { limit = 20 } = {}) {
+  const s = String(q || "").trim();
+  if (!s) return [];
+  const p = new URLSearchParams({
+    module: "tickets",
+    searchStr: s,
+    departmentId: ZOHO_DEPARTMENT_ID,
+    limit: String(limit),
+  });
+  const data = await zohoFetch(`/search?${p.toString()}`).catch(() => null);
+  return (data?.data || []).map(normalizeTicket);
+}
+
 // Create a new ticket (the team logs phone/walk-in requests themselves).
 export async function createTicket({ subject, description, email, name, phone, channel = "Phone" }) {
   if (!subject?.trim()) throw new Error("Missing subject");

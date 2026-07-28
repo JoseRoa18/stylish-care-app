@@ -13,7 +13,7 @@ import cors from "cors";
 import ticketsRouter from "./routes/tickets.js";
 import kbRouter from "./routes/kb.js";
 import translateRouter from "./routes/translate.js";
-import { zohoConfigured } from "./zoho.js";
+import { zohoConfigured, searchTicketsContent } from "./zoho.js";
 import { listManuals, dropboxConfigured } from "./dropbox.js";
 import { sourceCounts } from "./kb.js";
 import { geminiConfigured } from "./gemini.js";
@@ -204,8 +204,22 @@ export function createApp() {
     let counts = { all: 0, active: 0, closed: 0, byStatus: {} };
     let error = null;
     try {
-      const r = await queryTickets({ view, q, page, pageSize, sort });
-      tickets = r.tickets; total = r.total;
+      // metadata search (fast, local) + Zoho content search (finds keywords
+      // inside the email bodies) run together when the agent is searching
+      const [local, contentHits] = await Promise.all([
+        queryTickets({ view, q, page, pageSize, sort }),
+        q?.trim() && page === 1 ? searchTicketsContent(q).catch(() => []) : [],
+      ]);
+      tickets = local.tickets;
+      total = local.total;
+      if (Array.isArray(contentHits) && contentHits.length) {
+        const seen = new Set(tickets.map((t) => t.id));
+        const extras = contentHits.filter((t) => t.id && !seen.has(t.id));
+        tickets = [...tickets, ...extras].sort((a, b) =>
+          (a.modifiedTime || "") < (b.modifiedTime || "") ? 1 : -1
+        );
+        total += extras.length;
+      }
     } catch (e) { error = e.message; }
     try { counts = await ticketCounts(); } catch (e) { error = error || e.message; }
 
