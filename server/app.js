@@ -13,7 +13,8 @@ import cors from "cors";
 import ticketsRouter from "./routes/tickets.js";
 import kbRouter from "./routes/kb.js";
 import translateRouter from "./routes/translate.js";
-import { zohoConfigured, searchTicketsContent } from "./zoho.js";
+import { zohoConfigured, searchTicketsContent, createTicket, addTicketComment } from "./zoho.js";
+import { upsertTickets } from "./tickets-sync.js";
 import { listManuals, dropboxConfigured } from "./dropbox.js";
 import { sourceCounts } from "./kb.js";
 import { geminiConfigured } from "./gemini.js";
@@ -174,6 +175,59 @@ export function createApp() {
         action: "forward",
         replies: ["Let me connect you with our team so they can help you with that."],
       });
+    }
+  });
+
+  // ── Wix Inbox → app (via a Wix Automation "send HTTP request") ────
+  // PUBLIC, token-protected. Configure a Wix Automation: trigger "visitor
+  // sends an Inbox message" → action "Send HTTP request" POSTing
+  // { name, email, message } here. First message opens a Zoho ticket
+  // (channel Chat); follow-ups within 24h are appended to that ticket as
+  // internal notes (they show inline in the app's thread).
+  app.post("/api/wix/inbox-webhook", async (req, res) => {
+    if (!process.env.WIX_WEBHOOK_TOKEN || req.query.token !== process.env.WIX_WEBHOOK_TOKEN) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      const b = req.body || {};
+      const name = String(b.name || b.contactName || "").trim();
+      const email = String(b.email || b.contactEmail || "").trim().toLowerCase();
+      const message = String(b.message || b.text || b.body || "").trim();
+      if (!message) return res.json({ ok: true, skipped: "empty message" });
+
+      // recent open website-chat ticket from this visitor? append instead of duplicating
+      let appended = false;
+      if (email && supabase) {
+        const since = new Date(Date.now() - 24 * 3600000).toISOString();
+        const { data } = await supabase
+          .from("tickets")
+          .select("id,number")
+          .eq("customer_email", email)
+          .eq("channel", "Chat")
+          .not("status", "ilike", "%closed%")
+          .gte("modified_time", since)
+          .order("modified_time", { ascending: false })
+          .limit(1);
+        if (data?.length) {
+          await addTicketComment(data[0].id, `Website chat — ${name || email || "visitor"}: ${message}`);
+          appended = true;
+          res.json({ ok: true, appended, ticket: data[0].number });
+        }
+      }
+      if (!appended) {
+        const subject = `Website chat: ${message.slice(0, 60)}${message.length > 60 ? "…" : ""}`;
+        const ticket = await createTicket({
+          subject,
+          description: message,
+          email: email || undefined,
+          name: name || "Website visitor",
+          channel: "Chat",
+        });
+        try { await upsertTickets([ticket]); } catch { /* next sync adds it */ }
+        res.json({ ok: true, created: ticket.number });
+      }
+    } catch (err) {
+      res.status(200).json({ ok: false, error: err.message }); // 200 so Wix doesn't retry-spam
     }
   });
 
