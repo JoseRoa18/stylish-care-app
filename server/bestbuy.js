@@ -28,7 +28,17 @@ async function mk(path, options = {}, attempt = 0) {
     const txt = await res.text().catch(() => "");
     throw new Error(`Best Buy (Mirakl) ${res.status}: ${txt.slice(0, 160)}`);
   }
-  return res.status === 204 ? null : res.json();
+  if (res.status === 204) return null;
+  // Mirakl answers HTML (a block/login page) when the caller's IP isn't
+  // allowlisted for API access — surface that instead of a JSON parse error.
+  const ct = res.headers.get("content-type") || "";
+  if (!/json/i.test(ct)) {
+    const txt = (await res.text().catch(() => "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    throw new Error(
+      `Mirakl returned ${ct || "non-JSON"} instead of data — the server's IP is likely not allowlisted for API access in the Best Buy Marketplace settings. Response: ${txt.slice(0, 120)}`
+    );
+  }
+  return res.json();
 }
 
 const stripHtml = (h) =>
