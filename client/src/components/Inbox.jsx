@@ -232,7 +232,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
             {(() => {
               const sel = tickets.find((t) => t.id === openId);
               return sel ? (
-                <TicketRow
+                <AnyTicketRow
                   key={sel.id}
                   ticket={sel}
                   statusOptions={statusOptions}
@@ -250,7 +250,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
         </div>
       ) : (
         shown.map((t) => (
-          <TicketRow
+          <AnyTicketRow
             key={t.id}
             ticket={t}
             statusOptions={statusOptions}
@@ -616,6 +616,124 @@ function CompactRow({ ticket, selected, onClick }) {
       </div>
     </div>
   );
+}
+
+// A Best Buy Marketplace thread, rendered inside the same Inbox queue.
+// Replies go back into Best Buy's own messaging via the Mirakl API.
+function BestBuyTicketRow({ ticket, open, onToggle }) {
+  const threadId = String(ticket.id).replace(/^bb:/, "");
+  const [detail, setDetail] = useState(null);
+  const [order, setOrder] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (!open || detail || loading) return;
+    setLoading(true);
+    api.bbThread(threadId).then(setDetail).catch((e) => setErr(e.message)).finally(() => setLoading(false));
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const generate = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await api.bbDraft(threadId);
+      setDraft(r.draft || "");
+      setOrder(r.order || null);
+      if (r.thread) setDetail(r.thread);
+    } catch (e) { setErr(`Draft failed: ${e.message}`); }
+    finally { setBusy(false); }
+  };
+  const send = async () => {
+    if (!draft.trim()) return;
+    if (!confirm(`Send this reply to ${ticket.customerName} on Best Buy Marketplace?`)) return;
+    setSending(true); setErr(null);
+    try {
+      await api.bbReply(threadId, draft);
+      setSent(true);
+      api.bbThread(threadId).then(setDetail).catch(() => {});
+    } catch (e) { setErr(`Send failed: ${e.message}`); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div className="ticket">
+      <div className="ticket-head" onClick={onToggle}>
+        <div>
+          <div className="ticket-subj">{ticket.subject}</div>
+          <div className="ticket-meta">
+            <SourceBadge ticket={ticket} />
+            <span className="mono">#{ticket.number}</span>
+            <span>{ticket.customerName}</span>
+            {ticket.modifiedTime && <span>· {ago(ticket.modifiedTime)}</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          {!/closed/i.test(ticket.status || "") && (
+            <span className="wait" style={{ color: "#c0392b", borderColor: "#c0392b" }}>awaiting reply</span>
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <div className="ticket-body">
+          {err && <div className="banner error" style={{ marginTop: 12 }}>{err}</div>}
+          {loading && <div style={{ padding: "14px 0", color: "var(--ink-faint)" }}><span className="spin" /> Loading the Best Buy conversation…</div>}
+          {detail && (
+            <>
+              {order && (
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", background: "var(--paper)", borderRadius: 8, padding: "8px 10px", margin: "10px 0" }}>
+                  Order {order.id} · {order.state} · {order.date} · {order.items.map((i) => `${i.sku} ×${i.qty}`).join(", ")}
+                </div>
+              )}
+              <div className="convo">
+                {detail.messages.map((m) => (
+                  <div key={m.id} className={`msg ${m.from === "customer" ? "in" : "out"}`}>
+                    <div className="who">
+                      <span>{m.from === "customer" ? detail.customer : "Sinks Direct"}</span>
+                      <span className="when">{fmtTime(m.date)}</span>
+                    </div>
+                    <div className="text">{m.text}</div>
+                  </div>
+                ))}
+              </div>
+              {sent ? (
+                <div style={{ color: "var(--green)", fontSize: 13 }}>Reply sent to the customer on Best Buy.</div>
+              ) : (
+                <>
+                  <textarea
+                    rows={6}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="Write the reply, or generate one with AI…"
+                    style={{ width: "100%", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13.5, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                  />
+                  <div className="draft-actions">
+                    <button className="btn primary" onClick={generate} disabled={busy}>
+                      {busy ? <><span className="spin" /> Drafting…</> : "Generate reply with AI"}
+                    </button>
+                    <button className="btn send" onClick={send} disabled={sending || !draft.trim()}>
+                      {sending ? <><span className="spin" /> Sending…</> : "Send via Best Buy"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Picks the right renderer: Zoho ticket or Best Buy marketplace thread.
+function AnyTicketRow(props) {
+  return String(props.ticket.id).startsWith("bb:")
+    ? <BestBuyTicketRow ticket={props.ticket} open={props.open} onToggle={props.onToggle} />
+    : <TicketRow {...props} />;
 }
 
 function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "", peek = false }) {
@@ -1809,6 +1927,9 @@ const SOURCES = [
   [/wixforms\.com$|wix\.com$/i, "Website", "#2a7a6a"],
 ];
 function ticketSource(t) {
+  if (String(t.id || "").startsWith("bb:") || /best ?buy/i.test(t.channel || "")) {
+    return { label: "Best Buy", color: "#1c4fb8" };
+  }
   const domain = (t.customerEmail || "").split("@")[1] || "";
   for (const [re, label, color] of SOURCES) if (re.test(domain)) return { label, color };
   if (/closed wayfair|^wayfair$/i.test(t.status || "")) return { label: "Wayfair", color: "#7a3fa0" };

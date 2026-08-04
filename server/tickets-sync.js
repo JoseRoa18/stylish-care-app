@@ -107,6 +107,10 @@ export async function syncRecent({ pages = 1 } = {}) {
   return total;
 }
 
+// Rows that don't come from Zoho (e.g. "bb:" Best Buy marketplace threads)
+// must never be deleted by the Zoho reconcilers.
+const isZohoRow = (id) => !/^[a-z]+:/i.test(String(id || ""));
+
 // All rows we currently hold as active (paginated past the 1000-row cap).
 async function activeRows(fields = "id,status") {
   const rows = [];
@@ -145,7 +149,7 @@ export async function reconcileActive() {
   }
 
   let removed = 0, fixed = 0;
-  for (const r of rows.filter((x) => !seen.has(x.id))) {
+  for (const r of rows.filter((x) => isZohoRow(x.id) && !seen.has(x.id))) {
     const t = await fetchTicketById(r.id);
     if (t) {
       await upsertTickets([t]); // e.g. it was closed — refresh the row
@@ -191,7 +195,7 @@ export async function reconcileFull({ onPage } = {}) {
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
-  const stale = all.filter((r) => !seen.has(r.id));
+  const stale = all.filter((r) => isZohoRow(r.id) && !seen.has(r.id));
   for (let i = 0; i < stale.length; i += 100) {
     const ids = stale.slice(i, i + 100).map((r) => r.id);
     const { error } = await supabase.from("tickets").delete().in("id", ids);
@@ -213,6 +217,13 @@ export async function maybeSync(minMs = 120000) {
     await syncRecent();
   } catch {
     /* ignore — the table still serves the last good snapshot */
+  }
+  // marketplace threads live in the same queue as Zoho tickets
+  try {
+    const { syncThreadsToTickets } = await import("./bestbuy.js");
+    await syncThreadsToTickets(upsertTickets);
+  } catch {
+    /* Best Buy unreachable (e.g. IP not allowlisted) — inbox still works */
   }
   if (Date.now() - _lastReconcile > 15 * 60000) {
     _lastReconcile = Date.now();

@@ -4,14 +4,12 @@ import Dashboard from "./components/Dashboard.jsx";
 import Inbox from "./components/Inbox.jsx";
 import KnowledgeBase from "./components/KnowledgeBase.jsx";
 import Calls from "./components/Calls.jsx";
-import Marketplace from "./components/Marketplace.jsx";
 import Login from "./components/Login.jsx";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard" },
   { id: "inbox", label: "Inbox" },
   { id: "calls", label: "Calls" },
-  { id: "marketplace", label: "Best Buy" },
   { id: "kb", label: "Knowledge Base" },
 ];
 
@@ -139,7 +137,6 @@ export default function App() {
       {tab === "dashboard" && <Dashboard onOpenInbox={() => setTab("inbox")} />}
       {tab === "inbox" && <Inbox signature={signature} initialSearch={inboxSearch} />}
       {tab === "calls" && <Calls onOpenInbox={(term) => { setInboxSearch(term || ""); setTab("inbox"); }} />}
-      {tab === "marketplace" && <Marketplace />}
       {tab === "kb" && <KnowledgeBase />}
 
       {settingsOpen && (

@@ -84,6 +84,31 @@ export async function listThreads({ limit = 30 } = {}) {
     .sort((a, b) => (a.needsReply === b.needsReply ? (a.lastAt < b.lastAt ? 1 : -1) : a.needsReply ? -1 : 1));
 }
 
+// Mirror Best Buy threads into the same `tickets` table so they live in the
+// one Inbox queue (search, filters, pagination all work unchanged). Their ids
+// are prefixed "bb:" so the Zoho reconciler never touches them.
+export async function syncThreadsToTickets(upsertTickets, { limit = 50 } = {}) {
+  if (!bestbuyConfigured()) return 0;
+  const threads = await listThreads({ limit });
+  if (!threads.length) return 0;
+  const rows = threads.map((t) => ({
+    id: `bb:${t.id}`,
+    number: t.orderId || t.id.slice(0, 8),
+    subject: t.topic,
+    status: t.needsReply ? "Open" : "Closed Best Buy",
+    channel: "Best Buy",
+    customerName: t.customer,
+    customerEmail: "",
+    createdTime: t.createdAt,
+    modifiedTime: t.lastAt || t.updatedAt,
+    closedTime: null,
+    customerResponseTime: t.waitingSince || t.lastAt,
+    webUrl: null,
+  }));
+  await upsertTickets(rows);
+  return rows.length;
+}
+
 export async function getThread(threadId) {
   const t = await mk(`/inbox/threads/${threadId}`);
   const msgs = (t?.messages?.data || t?.messages || []).map((m) => ({
