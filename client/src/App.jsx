@@ -83,8 +83,8 @@ export default function App() {
       <div className="topbar">
         <div>
           <div className="brand">
-            <h1>Stylish</h1>
-            <span className="sub">Customer Care</span>
+            <h1>WeCare</h1>
+            <span className="sub">Stylish Customer Care</span>
           </div>
           <div className="tabs">
             {TABS.map((t) => (

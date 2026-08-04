@@ -246,6 +246,7 @@ function AvgResolutionCard({ defaultAvgMs, defaultCount }) {
           style={{ fontSize: 11, padding: "2px 4px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--card)", color: "var(--ink-soft)", cursor: "pointer", textTransform: "none", letterSpacing: 0 }}
         >
           <option value="all">All time</option>
+          <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
           <option value="90d">Last 90 days</option>
           {years.map((y) => <option key={y} value={`year:${y}`}>{y}</option>)}

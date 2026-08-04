@@ -33,10 +33,10 @@ export const api = {
   createTicket: (payload) =>
     req(`/tickets/create`, { method: "POST", body: JSON.stringify(payload) }),
   conversation: (id) => req(`/tickets/${id}/conversation`),
-  draft: (id, ticket) =>
+  draft: (id, ticket, instructions) =>
     req(`/tickets/${id}/draft`, {
       method: "POST",
-      body: JSON.stringify({ ticket }),
+      body: JSON.stringify({ ticket, instructions }),
     }),
   send: (id, to, content, contentType = "html", feedback, attachmentIds, cc) =>
     req(`/tickets/${id}/send`, {

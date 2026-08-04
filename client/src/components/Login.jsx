@@ -25,8 +25,8 @@ export default function Login({ onSuccess }) {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <form onSubmit={submit} className="card" style={{ width: "100%", maxWidth: 360, padding: 28 }}>
         <div className="brand" style={{ marginBottom: 4 }}>
-          <h1 style={{ margin: 0 }}>Stylish</h1>
-          <span className="sub">Customer Care</span>
+          <h1 style={{ margin: 0 }}>WeCare</h1>
+          <span className="sub">Stylish Customer Care</span>
         </div>
         <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "8px 0 18px" }}>
           Enter the team password to continue.

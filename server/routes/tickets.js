@@ -63,6 +63,7 @@ router.post("/:id/draft", async (req, res) => {
   try {
     const ticket = req.body.ticket;
     if (!ticket) return res.status(400).json({ error: "Missing ticket payload" });
+    const instructions = String(req.body.instructions || "").trim();
     const conversation = await getConversation(req.params.id);
     // order numbers mentioned in the subject + the customer's messages
     const orderText = `${ticket.subject || ""} ${conversation.filter((m) => m.direction !== "out").map((m) => m.text || "").join(" ")}`;
@@ -76,7 +77,7 @@ router.post("/:id/draft", async (req, res) => {
       orderNums.length ? lookupOrders(orderNums).catch(() => []) : [],
       orderNums.length ? lookupWayfairPos(orderNums).catch(() => []) : [],
     ]);
-    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos });
+    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos, instructions });
     // append the official signature so every AI draft ends consistently
     try {
       const { signature } = await getSettings();
@@ -92,15 +93,29 @@ router.post("/:id/draft", async (req, res) => {
   }
 });
 
-// POST /api/tickets/create — open a new ticket from the app.
+// POST /api/tickets/create — open a new ticket from the app. With
+// sendEmail:true the description is also emailed to the customer as the
+// ticket's first reply (signature auto-appended, optional cc).
 router.post("/create", async (req, res) => {
   try {
-    const { subject, description, email, name, phone, channel } = req.body;
+    const { subject, description, email, name, phone, channel, cc, sendEmail } = req.body;
     if (!subject?.trim()) return res.status(400).json({ error: "Missing subject" });
     const ticket = await createTicket({ subject, description, email, name, phone, channel });
     // show up in the inbox list immediately (don't wait for the next sync)
     try { await upsertTickets([ticket]); } catch { /* next sync adds it */ }
-    res.json({ ok: true, ticket });
+
+    let emailed = false;
+    if (sendEmail && email?.trim() && description?.trim()) {
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      let html = `<p>${esc(description.trim()).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")}</p>`;
+      try {
+        const { signature } = await getSettings();
+        html = appendSignature(html, signature);
+      } catch { /* signature optional */ }
+      await sendReply(ticket.id, { to: email.trim(), cc, content: html, contentType: "html" });
+      emailed = true;
+    }
+    res.json({ ok: true, ticket, emailed });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

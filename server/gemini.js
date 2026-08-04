@@ -80,6 +80,10 @@ ADDRESS EVERYTHING:
 - Respond to every concrete point in the customer's latest message: each question, each symptom or detail they describe, and any specific offer or request they make. Never silently drop a detail they took the time to raise.
 - If the customer signals a broader concern (for example, they resell or recommend the product to their own clients), acknowledge it directly and take it seriously.
 
+AGENT INSTRUCTIONS (when present):
+- If the request includes an "AGENT INSTRUCTIONS" section, the human agent is telling you WHAT the reply should say — rough notes, bullet points or a quick draft. Turn them into the full, polished reply: expand them naturally, keep the ticket's context and tone rules, and use the Knowledge Base for supporting details.
+- Every specific the agent gives there (resolutions, replacements, refunds, timelines, amounts) is AUTHORIZED by the human and must be kept exactly — those instructions override the caution rules below. Do not add commitments the agent didn't give.
+
 WARRANTY / DEFECT / COMPLAINT:
 - Validate the customer's experience, but do NOT admit fault, assign a cause, or concede the product is defective — especially while any inspection, factory report or internal review is pending. Treat the customer's care practices as helpful context for the review, not as proof of cause.
 - Do not promise a replacement, refund, credit or any other resolution. Those decisions are made by a human.
@@ -230,7 +234,7 @@ export async function improveDraft({ draft }) {
   return { reply: reply.trim() || src };
 }
 
-export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [] }) {
+export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [], instructions = "" }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");
   }
@@ -244,6 +248,9 @@ export async function generateDraft({ ticket, conversation, kb, images = [], ord
   const wayfairBlock = wayfairPos.length
     ? `\n=== WAYFAIR PURCHASE ORDERS ===\n${wayfairToText(wayfairPos)}\n`
     : "";
+  const instructionsBlock = instructions
+    ? `\n=== AGENT INSTRUCTIONS (write the reply saying this) ===\n${instructions.slice(0, 4000)}\n`
+    : "";
 
   const userContent = `Customer: ${ticket.customerName} <${ticket.customerEmail}>
 Subject: ${ticket.subject}
@@ -251,7 +258,7 @@ Channel: ${ticket.channel || "Email"}
 
 === CONVERSATION (oldest first) ===
 ${conversationToText(conversation)}
-${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}
+${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}${instructionsBlock}
 === APPROVED KNOWLEDGE BASE ===
 ${kbToText(kb)}
 

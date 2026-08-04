@@ -491,14 +491,24 @@ function StatusSelect({ status, options = [], onChange, saving }) {
 
 // Create a new ticket by hand (phone/walk-in requests the team logs itself).
 function NewTicketModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ name: "", email: "", phone: "", channel: "Phone", subject: "", description: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", channel: "Phone", subject: "", description: "", cc: "", sendEmail: false });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  const [tpls, setTpls] = useState(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const inputStyle = { width: "100%", padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, boxSizing: "border-box" };
+  useEffect(() => {
+    api.templates().then((r) => setTpls((r.templates || []).slice().sort((a, b) => (a.title || "").localeCompare(b.title || "")))).catch(() => setTpls([]));
+  }, []);
+  const insertTemplate = (id) => {
+    const t = (tpls || []).find((x) => x.id === id);
+    if (!t) return;
+    setForm((f) => ({ ...f, description: (f.description ? f.description + "\n\n" : "") + (t.body || "") }));
+  };
   const submit = async () => {
     if (!form.subject.trim()) { setErr("Subject is required."); return; }
     if (!form.name.trim() && !form.email.trim()) { setErr("Enter at least the customer's name or email."); return; }
+    if (form.sendEmail && !form.email.trim()) { setErr("An email is required to send the message to the customer."); return; }
     setSaving(true);
     setErr(null);
     try {
@@ -535,9 +545,31 @@ function NewTicketModal({ onClose, onCreated }) {
         <label style={{ display: "block", fontSize: 12, color: "var(--ink-soft)", marginTop: 10 }}>Subject *
           <input value={form.subject} onChange={set("subject")} style={inputStyle} placeholder="e.g. Missing strainer for S-823 sink" />
         </label>
-        <label style={{ display: "block", fontSize: 12, color: "var(--ink-soft)", marginTop: 10 }}>Description
-          <textarea rows={4} value={form.description} onChange={set("description")} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} placeholder="What the customer reported / asked for…" />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Description</span>
+          <select
+            value=""
+            onChange={(e) => { insertTemplate(e.target.value); e.target.value = ""; }}
+            style={{ fontSize: 11, padding: "3px 6px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--card)", color: "var(--ink-soft)", cursor: "pointer", maxWidth: 220 }}
+          >
+            <option value="" disabled>{tpls === null ? "Loading templates…" : "+ Insert a template…"}</option>
+            {(tpls || []).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+        </div>
+        <textarea rows={5} value={form.description} onChange={set("description")} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", marginTop: 4 }} placeholder="What the customer reported / asked for — or the message to send them…" />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13, color: "var(--ink)" }}>
+          <input
+            type="checkbox"
+            checked={form.sendEmail}
+            onChange={(e) => setForm((f) => ({ ...f, sendEmail: e.target.checked }))}
+          />
+          Also email this description to the customer (signature added automatically)
         </label>
+        {form.sendEmail && (
+          <label style={{ display: "block", fontSize: 12, color: "var(--ink-soft)", marginTop: 8 }}>Cc (optional, comma-separated)
+            <input value={form.cc} onChange={set("cc")} style={inputStyle} placeholder="someone@company.com" />
+          </label>
+        )}
         {err && <div className="banner error" style={{ marginTop: 10 }}>{err}</div>}
         <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
           <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
@@ -984,11 +1016,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     if (open && !convoLoaded && !convoLoading) loadConversation();
   }, [open, convoLoaded, convoLoading, loadConversation]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (instructions) => {
     setDrafting(true);
     setDraftError(null);
     try {
-      const res = await api.draft(ticket.id, ticket);
+      const res = await api.draft(ticket.id, ticket, typeof instructions === "string" ? instructions : undefined);
       if (res.conversation) {
         setConversation(res.conversation);
         setConvoLoaded(true);
@@ -1516,6 +1548,17 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                   <button className="btn sm" disabled={improving || xDraft} onClick={improveCurrentDraft} title="Polish tone & grammar without changing the facts">
                     {improving ? <><span className="spin" /> Improving…</> : "Improve with AI"}
+                  </button>
+                  <button
+                    className="btn sm"
+                    disabled={drafting || improving || xDraft}
+                    title="Write rough notes of what you want to say — the AI composes the full reply from them (with the ticket's context)"
+                    onClick={() => {
+                      const plain = draftHtml.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+                      if (plain) generate(plain);
+                    }}
+                  >
+                    {drafting ? <><span className="spin" /> Writing…</> : "AI: write from my notes"}
                   </button>
                   <button className="btn sm" onClick={toggleTemplates}>Templates</button>
                   {signature && (
