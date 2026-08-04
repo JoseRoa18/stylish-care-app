@@ -26,6 +26,7 @@ import { wixConfigured, searchOrdersByEmail, searchProducts } from "./wix.js";
 import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./wayfair.js";
 import { sendChatMessage } from "./wix.js";
+import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThread } from "./bestbuy.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -113,6 +114,7 @@ export function createApp() {
       shipstation: shipstationConfigured(),
       ringcentral: ringcentralConfigured(),
       wayfair: wayfairConfigured(),
+      bestbuy: bestbuyConfigured(),
     })
   );
 
@@ -472,6 +474,36 @@ export function createApp() {
     try {
       const days = Math.min(30, Math.max(3, Number(req.query.days) || 14));
       res.json({ days, ...(await getRecentCancellations({ days })) });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ── Best Buy Marketplace (Mirakl) customer messages ────────
+  app.get("/api/bestbuy/threads", async (req, res) => {
+    try {
+      res.json({ threads: await listThreads({ limit: Math.min(50, Number(req.query.limit) || 30) }) });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.get("/api/bestbuy/threads/:id", async (req, res) => {
+    try {
+      res.json(await getThread(req.params.id));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.post("/api/bestbuy/threads/:id/draft", async (req, res) => {
+    try {
+      res.json(await draftThreadReply(req.params.id));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+  app.post("/api/bestbuy/threads/:id/reply", async (req, res) => {
+    try {
+      res.json(await replyToThread(req.params.id, req.body?.text));
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

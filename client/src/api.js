@@ -72,6 +72,11 @@ export const api = {
   shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
   wayfairPo: (numbers) => req(`/wayfair/po?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   wayfairCancellations: (days = 14) => req(`/wayfair/cancellations?days=${days}`),
+  bbThreads: () => req(`/bestbuy/threads`),
+  bbThread: (id) => req(`/bestbuy/threads/${id}`),
+  bbDraft: (id) => req(`/bestbuy/threads/${id}/draft`, { method: "POST" }),
+  bbReply: (id, text) =>
+    req(`/bestbuy/threads/${id}/reply`, { method: "POST", body: JSON.stringify({ text }) }),
   wixChat: (email, text) =>
     req(`/wix/chat`, { method: "POST", body: JSON.stringify({ email, text }) }),
   bazaarvoice: (id) => req(`/tickets/${id}/bazaarvoice`),
