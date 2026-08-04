@@ -47,6 +47,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
       }
     } catch { /* ignore */ }
   }, []);
+  const [source, setSource] = useState("all"); // origin filter (Wayfair, RONA…)
   const [layout, setLayout] = useState(() => localStorage.getItem("inboxLayout") || "split");
   useEffect(() => { localStorage.setItem("inboxLayout", layout); }, [layout]);
   const [search, setSearch] = useState("");
@@ -115,6 +116,9 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
     : key === "active" ? counts.active
     : counts.byStatus?.[key] || 0;
 
+  // origin filter is applied to the loaded page (badges show the source)
+  const shown = source === "all" ? tickets : tickets.filter((t) => ticketSource(t).label === source);
+
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
@@ -177,6 +181,20 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
             onChange={(e) => setSearch(e.target.value)}
           />
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-faint)" }}>
+            Source:
+            <select
+              className="status-select"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              title="Filter by where the ticket came from"
+            >
+              <option value="all">All sources</option>
+              {[...new Set(tickets.map((t) => ticketSource(t).label))].sort().map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-faint)" }}>
             Sort:
             <select
               className="status-select"
@@ -196,16 +214,17 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
         {total} ticket{total === 1 ? "" : "s"}
         {view !== "all" && view !== "active" ? ` · ${view}` : view === "active" ? " · active" : ""}
         {debounced ? ` · matching “${debounced}”` : ""}
+        {source !== "all" ? ` · showing ${shown.length} from ${source}` : ""}
       </div>
 
       {err && <div className="banner error">{err}</div>}
 
-      {tickets.length === 0 ? (
+      {shown.length === 0 ? (
         <div className="empty">{loading ? "Loading…" : "No tickets match this view."}</div>
       ) : layout === "split" ? (
         <div className="peek">
           <div className="peek-list">
-            {tickets.map((t) => (
+            {shown.map((t) => (
               <CompactRow key={t.id} ticket={t} selected={openId === t.id} onClick={() => setOpenId(t.id)} />
             ))}
           </div>
@@ -230,7 +249,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
           </div>
         </div>
       ) : (
-        tickets.map((t) => (
+        shown.map((t) => (
           <TicketRow
             key={t.id}
             ticket={t}
@@ -588,6 +607,7 @@ function CompactRow({ ticket, selected, onClick }) {
     <div className={`peek-row ${selected ? "sel" : ""}`} onClick={onClick}>
       <div className="peek-subj">{ticket.subject}</div>
       <div className="peek-meta">
+        <SourceBadge ticket={ticket} />
         <span className="mono">#{ticket.number}</span>
         <span className="peek-cust">{ticket.customerName}</span>
         <span style={{ marginLeft: "auto", flexShrink: 0 }}>
@@ -1163,6 +1183,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             )}
           </div>
           <div className="ticket-meta">
+            <SourceBadge ticket={ticket} />
             <span className="mono">#{ticket.number}</span>
             <span>{ticket.customerName}</span>
             {ticket.customerEmail && <span>{ticket.customerEmail}</span>}
@@ -1768,6 +1789,45 @@ function fmtBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1048576) return `${Math.round(n / 1024)} KB`;
   return `${(n / 1048576).toFixed(1)} MB`;
+}
+
+// Where a ticket came from — marketplace, carrier, website or direct contact.
+// Keeps one queue in the Inbox while always showing the origin at a glance.
+const SOURCES = [
+  [/(^|\.)wayfair\.com$/i, "Wayfair", "#7a3fa0"],
+  [/(^|\.)rona\.ca$/i, "RONA", "#0a6b3d"],
+  [/(^|\.)lowes\.com$/i, "Lowe's", "#12457f"],
+  [/bestbuy(canada)?\.(ca|com)$/i, "Best Buy", "#1c4fb8"],
+  [/homedepot\.(ca|com)$/i, "Home Depot", "#c2571a"],
+  [/(^|\.)(amazon|marketplace\.amazon)\.[a-z.]+$/i, "Amazon", "#b3701a"],
+  [/walmart\.com$/i, "Walmart", "#1a5fa8"],
+  [/menards\.com$/i, "Menards", "#8a6a1a"],
+  [/bazaarvoice\.com$/i, "Bazaarvoice", "#9a3f6b"],
+  [/(^|\.)ups(billing)?\.com$/i, "UPS", "#6b4a1a"],
+  [/(fedex|purolator|canpar|canadapost)\./i, "Carrier", "#6b4a1a"],
+  [/shipstation\.com$/i, "ShipStation", "#3b6a7a"],
+  [/wixforms\.com$|wix\.com$/i, "Website", "#2a7a6a"],
+];
+function ticketSource(t) {
+  const domain = (t.customerEmail || "").split("@")[1] || "";
+  for (const [re, label, color] of SOURCES) if (re.test(domain)) return { label, color };
+  if (/closed wayfair|^wayfair$/i.test(t.status || "")) return { label: "Wayfair", color: "#7a3fa0" };
+  const ch = (t.channel || "").toLowerCase();
+  if (ch === "chat") return { label: "Website chat", color: "#2a7a6a" };
+  if (ch === "phone") return { label: "Phone", color: "#7a8b6f" };
+  if (ch === "web") return { label: "Web form", color: "#2a7a6a" };
+  return { label: "Email", color: "#8a857c" };
+}
+function SourceBadge({ ticket }) {
+  const s = ticketSource(ticket);
+  return (
+    <span
+      title={`Source: ${s.label}`}
+      style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 4, color: s.color, border: `1px solid ${s.color}`, whiteSpace: "nowrap", flexShrink: 0 }}
+    >
+      {s.label}
+    </span>
+  );
 }
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
