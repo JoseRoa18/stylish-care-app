@@ -2048,10 +2048,14 @@ function BazaarvoicePanel({ data }) {
   const [drafts, setDrafts] = useState(() => data.items.map((i) => i.draft || ""));
   const [copied, setCopied] = useState(null);
   const copy = (i) => {
-    navigator.clipboard?.writeText(drafts[i] || "").then(() => {
-      setCopied(i);
-      setTimeout(() => setCopied((c) => (c === i ? null : c)), 2000);
-    });
+    const ok = navigator.clipboard?.writeText(drafts[i] || "");
+    setCopied(i);
+    setTimeout(() => setCopied((c) => (c === i ? null : c)), 2000);
+    return ok || Promise.resolve();
+  };
+  // one click: copy the answer, then open that item's response form in BV
+  const copyAndOpen = (i, link) => {
+    copy(i).finally(() => window.open(link, "_blank", "noopener"));
   };
   return (
     <div className="card" style={{ marginTop: 12, padding: 14, borderColor: "var(--brass)" }}>
@@ -2077,13 +2081,18 @@ function BazaarvoicePanel({ data }) {
             placeholder="AI draft…"
             style={{ width: "100%", marginTop: 8, padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
           />
-          <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn sm" onClick={() => copy(i)}>{copied === i ? "Copied" : "Copy answer"}</button>
             {it.link && (
-              <a className="btn sm primary" href={it.link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                Post in Bazaarvoice →
-              </a>
+              <button
+                className="btn sm primary"
+                onClick={() => copyAndOpen(i, it.link)}
+                title="Copies the answer and opens this item's response form in Bazaarvoice — paste and submit there"
+              >
+                Copy &amp; open in Bazaarvoice →
+              </button>
             )}
+            <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>paste &amp; submit in Bazaarvoice</span>
           </div>
         </div>
       ))}
