@@ -27,6 +27,7 @@ import { shipstationConfigured, lookupOrder } from "./shipstation.js";
 import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./wayfair.js";
 import { sendChatMessage } from "./wix.js";
 import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThread } from "./bestbuy.js";
+import { walmartConfigured, lookupWalmartOrders } from "./walmart.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -115,6 +116,7 @@ export function createApp() {
       ringcentral: ringcentralConfigured(),
       wayfair: wayfairConfigured(),
       bestbuy: bestbuyConfigured(),
+      walmart: walmartConfigured(),
     })
   );
 
@@ -504,6 +506,16 @@ export function createApp() {
   app.post("/api/bestbuy/threads/:id/reply", async (req, res) => {
     try {
       res.json(await replyToThread(req.params.id, req.body?.text));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Walmart — look up order(s) by purchase/customer order number.
+  app.get("/api/walmart/orders", async (req, res) => {
+    try {
+      const nums = String(req.query.numbers || req.query.number || "").split(",");
+      res.json({ orders: await lookupWalmartOrders(nums) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

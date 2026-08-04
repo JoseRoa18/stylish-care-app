@@ -1000,6 +1000,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // Bazaarvoice: retailer questions/reviews parsed from the alert + AI drafts
   const [bv, setBv] = useState(null);
 
+  // Walmart: order details auto-loaded from long order numbers in the ticket
+  const [walmartOrders, setWalmartOrders] = useState(null);
+
   // ShipStation: shipment lookup by order number (any channel)
   const [shipResults, setShipResults] = useState(null);
   const [shipQ, setShipQ] = useState("");
@@ -1150,6 +1153,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
         if (wfNums.length) {
           api.wayfairPo(wfNums).then((r) => { if (r.pos?.length) setWayfairPos(r.pos); }).catch(() => {});
         }
+      }
+      // Walmart order ids are long numerics (12-18 digits)
+      const wmNums = [...new Set((text.match(/\b\d{12,18}\b/g) || []))].slice(0, 3);
+      if (wmNums.length) {
+        api.walmartOrders(wmNums).then((r) => { if (r.orders?.length) setWalmartOrders(r.orders); }).catch(() => {});
       }
     } catch (e) {
       setConvoError(e.message);
@@ -1830,6 +1838,31 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               <div style={{ margin: "10px 0 4px" }}>
                 <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>Wayfair PO ({wayfairPos.length})</div>
                 {wayfairPos.map((p) => <WayfairCard key={p.poNumber} po={p} />)}
+              </div>
+            )}
+            {walmartOrders && walmartOrders.length > 0 && (
+              <div style={{ margin: "10px 0 4px" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>Walmart order ({walmartOrders.length})</div>
+                {walmartOrders.map((o) => (
+                  <div key={o.poNumber} className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span className="mono" style={{ fontWeight: 700 }}>#{o.customerOrderId || o.poNumber}</span>
+                      <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{o.customer}{o.city ? ` · ${o.city}` : ""}</span>
+                      <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{o.date}</span>
+                    </div>
+                    {o.items.map((i, k) => (
+                      <div key={k} style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>
+                        {i.sku}{i.qty > 1 ? ` ×${i.qty}` : ""} · <Pill text={i.status || "?"} color={/ship|deliver/i.test(i.status || "") ? "#3b7a57" : "#c8912a"} />
+                        {i.tracking && (
+                          <span style={{ marginLeft: 6 }}>
+                            {i.carrier || "Tracking"}:{" "}
+                            {i.trackingUrl ? <a href={i.trackingUrl} target="_blank" rel="noreferrer">{i.tracking}</a> : <span className="mono">{i.tracking}</span>}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
               </div>
             )}
             <PhonePanel

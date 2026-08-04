@@ -29,6 +29,7 @@ import { getSettings, saveSettings, appendSignature } from "../settings.js";
 import { searchOrdersByEmail } from "../wix.js";
 import { lookupOrders, extractOrderNumbers } from "../shipstation.js";
 import { lookupWayfairPos } from "../wayfair.js";
+import { lookupWalmartOrders, extractWalmartNumbers } from "../walmart.js";
 import { isBazaarvoiceAlert, parseAndDraft } from "../bazaarvoice.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
@@ -71,14 +72,16 @@ router.post("/:id/draft", async (req, res) => {
     const orderNums = extractOrderNumbers(orderText);
     // retrieve KB, the customer's photos, their Wix store orders (by email),
     // and ShipStation shipments (by order number) — ground the reply in all
-    const [kb, images, orders, shipments, wayfairPos] = await Promise.all([
+    const walmartNums = extractWalmartNumbers(orderText);
+    const [kb, images, orders, shipments, wayfairPos, walmartOrders] = await Promise.all([
       retrieveRelevant({ ticket, conversation }, 8),
       fetchConversationImages(req.params.id, conversation),
       ticket.customerEmail ? searchOrdersByEmail(ticket.customerEmail).catch(() => []) : [],
       orderNums.length ? lookupOrders(orderNums).catch(() => []) : [],
       orderNums.length ? lookupWayfairPos(orderNums).catch(() => []) : [],
+      walmartNums.length ? lookupWalmartOrders(walmartNums).catch(() => []) : [],
     ]);
-    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos, instructions });
+    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos, walmartOrders, instructions });
     // append the official signature so every AI draft ends consistently
     try {
       const { signature } = await getSettings();

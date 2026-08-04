@@ -7,6 +7,7 @@
 import { ordersToText } from "./wix.js";
 import { shipmentsToText } from "./shipstation.js";
 import { wayfairToText } from "./wayfair.js";
+import { walmartToText } from "./walmart.js";
 
 const { GEMINI_API_KEY, GEMINI_MODEL } = process.env;
 const MODEL = GEMINI_MODEL || "gemini-3.1-pro-preview";
@@ -234,7 +235,7 @@ export async function improveDraft({ draft }) {
   return { reply: reply.trim() || src };
 }
 
-export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [], instructions = "" }) {
+export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [], walmartOrders = [], instructions = "" }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");
   }
@@ -248,6 +249,9 @@ export async function generateDraft({ ticket, conversation, kb, images = [], ord
   const wayfairBlock = wayfairPos.length
     ? `\n=== WAYFAIR PURCHASE ORDERS ===\n${wayfairToText(wayfairPos)}\n`
     : "";
+  const walmartBlock = walmartOrders.length
+    ? `\n=== WALMART ORDERS ===\n${walmartToText(walmartOrders)}\n`
+    : "";
   const instructionsBlock = instructions
     ? `\n=== AGENT INSTRUCTIONS (write the reply saying this) ===\n${instructions.slice(0, 4000)}\n`
     : "";
@@ -258,7 +262,7 @@ Channel: ${ticket.channel || "Email"}
 
 === CONVERSATION (oldest first) ===
 ${conversationToText(conversation)}
-${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}${instructionsBlock}
+${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}${walmartBlock}${instructionsBlock}
 === APPROVED KNOWLEDGE BASE ===
 ${kbToText(kb)}
 

@@ -71,6 +71,7 @@ export const api = {
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
   shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
   wayfairPo: (numbers) => req(`/wayfair/po?numbers=${encodeURIComponent((numbers || []).join(","))}`),
+  walmartOrders: (numbers) => req(`/walmart/orders?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   wayfairCancellations: (days = 14) => req(`/wayfair/cancellations?days=${days}`),
   bbThreads: () => req(`/bestbuy/threads`),
   bbThread: (id) => req(`/bestbuy/threads/${id}`),
