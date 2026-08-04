@@ -74,6 +74,7 @@ export const api = {
   wayfairCancellations: (days = 14) => req(`/wayfair/cancellations?days=${days}`),
   wixChat: (email, text) =>
     req(`/wix/chat`, { method: "POST", body: JSON.stringify({ email, text }) }),
+  bazaarvoice: (id) => req(`/tickets/${id}/bazaarvoice`),
   phoneHistory: (id, phone) =>
     req(`/tickets/${id}/phone-history${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`),
   rcRecordingUrl: (id) => `/api/ringcentral/recording/${encodeURIComponent(id)}`,

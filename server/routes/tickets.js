@@ -29,6 +29,7 @@ import { getSettings, saveSettings, appendSignature } from "../settings.js";
 import { searchOrdersByEmail } from "../wix.js";
 import { lookupOrders, extractOrderNumbers } from "../shipstation.js";
 import { lookupWayfairPos } from "../wayfair.js";
+import { isBazaarvoiceAlert, parseAndDraft } from "../bazaarvoice.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
@@ -287,6 +288,18 @@ router.post(
     }
   }
 );
+
+// GET /api/tickets/:id/bazaarvoice — parse a Bazaarvoice Connections alert
+// (questions / reviews on retailer product pages) and draft public answers.
+router.get("/:id/bazaarvoice", async (req, res) => {
+  try {
+    const conversation = await getConversation(req.params.id, { maxThreads: 2 });
+    if (!isBazaarvoiceAlert({}, conversation)) return res.json({ kind: null, items: [] });
+    res.json(await parseAndDraft(conversation));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // GET /api/tickets/:id/phone-history?phone= — RingCentral calls/voicemails/SMS
 // for the ticket's customer (phone auto-detected from Zoho, overridable).

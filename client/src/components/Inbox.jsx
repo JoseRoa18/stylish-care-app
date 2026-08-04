@@ -859,6 +859,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // Wayfair: PO details auto-loaded from CS/CA numbers in the ticket
   const [wayfairPos, setWayfairPos] = useState(null);
 
+  // Bazaarvoice: retailer questions/reviews parsed from the alert + AI drafts
+  const [bv, setBv] = useState(null);
+
   // ShipStation: shipment lookup by order number (any channel)
   const [shipResults, setShipResults] = useState(null);
   const [shipQ, setShipQ] = useState("");
@@ -990,6 +993,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     else setOrders([]);
     // RingCentral phone history (auto by the ticket's phone)
     api.phoneHistory(ticket.id).then((r) => { setPhoneHist(r); if (r.phone) setPhoneVal(r.phone); }).catch(() => {});
+    // Bazaarvoice alert? parse it and draft the public answers
+    if (/bazaarvoice/i.test(ticket.customerEmail || "")) {
+      setBv("loading");
+      api.bazaarvoice(ticket.id).then((r) => setBv(r.items?.length ? r : null)).catch(() => setBv(null));
+    }
     try {
       const res = await api.conversation(ticket.id);
       setConversation(res.conversation || []);
@@ -1321,6 +1329,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
               </div>
             </>
           )}
+
+          {bv === "loading" && (
+            <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 10 }}>
+              <span className="spin" /> Reading the Bazaarvoice alert and drafting answers…
+            </div>
+          )}
+          {bv && bv !== "loading" && <BazaarvoicePanel data={bv} />}
 
           <AttachmentStrip ticketId={ticket.id} attachments={attachments} />
 
@@ -2023,6 +2038,55 @@ function PhonePanel({ hist, phoneVal, setPhoneVal, loading, onLookup, onCall, sm
           {total === 0 && !loading && <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 8 }}>No phone history for this number.</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+// Bazaarvoice: retailer product-page questions/reviews from a Connections
+// alert, each with an AI-drafted public answer to review, copy and post.
+function BazaarvoicePanel({ data }) {
+  const [drafts, setDrafts] = useState(() => data.items.map((i) => i.draft || ""));
+  const [copied, setCopied] = useState(null);
+  const copy = (i) => {
+    navigator.clipboard?.writeText(drafts[i] || "").then(() => {
+      setCopied(i);
+      setTimeout(() => setCopied((c) => (c === i ? null : c)), 2000);
+    });
+  };
+  return (
+    <div className="card" style={{ marginTop: 12, padding: 14, borderColor: "var(--brass)" }}>
+      <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 8 }}>
+        Bazaarvoice · {data.items.length} {data.kind === "review" ? "review" : "question"}
+        {data.items.length === 1 ? "" : "s"} awaiting a public response
+      </div>
+      {data.items.map((it, i) => (
+        <div key={i} style={{ borderTop: i ? "1px solid var(--line-soft)" : "none", paddingTop: i ? 12 : 0, marginTop: i ? 12 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11, color: "var(--ink-faint)" }}>
+            <span style={{ fontWeight: 700, color: "var(--brass)" }}>{it.retailer}</span>
+            <span>{it.product}</span>
+            {it.rating != null && (
+              <span style={{ color: it.rating <= 2 ? "var(--red)" : "var(--amber)" }}>{"★".repeat(it.rating)}{"☆".repeat(5 - it.rating)}</span>
+            )}
+          </div>
+          {it.title && <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 4 }}>{it.title}</div>}
+          <div style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4, whiteSpace: "pre-wrap" }}>{it.text}</div>
+          <textarea
+            rows={4}
+            value={drafts[i]}
+            onChange={(e) => setDrafts((d) => d.map((x, j) => (j === i ? e.target.value : x)))}
+            placeholder="AI draft…"
+            style={{ width: "100%", marginTop: 8, padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9", fontSize: 13, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+            <button className="btn sm" onClick={() => copy(i)}>{copied === i ? "Copied" : "Copy answer"}</button>
+            {it.link && (
+              <a className="btn sm primary" href={it.link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                Post in Bazaarvoice →
+              </a>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
