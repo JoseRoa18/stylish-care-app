@@ -18,7 +18,12 @@ export function bestbuyConfigured() {
 async function mk(path, options = {}, attempt = 0) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: { Authorization: KEY, ...(options.headers || {}) },
+    headers: {
+      Authorization: KEY,
+      Accept: "application/json",
+      "User-Agent": "WeCare/1.0 (Stylish International; care@stylishkb.com)",
+      ...(options.headers || {}),
+    },
   });
   if (res.status === 429 && attempt < 2) {
     await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
