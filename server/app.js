@@ -462,10 +462,14 @@ export function createApp() {
     }
   });
 
-  // ShipStation — look up a shipment/order by number (any channel).
+  // ShipStation — look up a shipment/order by number (any channel). The caller
+  // passes who the ticket is from so we can tell apart same-numbered orders
+  // that belong to different brands (Sinks Direct vs Stylish share numbering).
   app.get("/api/shipstation/order", async (req, res) => {
     try {
-      res.json({ orders: await lookupOrder(req.query.number || "") });
+      const split = (v) => String(v || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const who = { emails: split(req.query.emails), names: split(req.query.names) };
+      res.json({ orders: await lookupOrder(req.query.number || "", who) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

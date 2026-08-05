@@ -27,7 +27,7 @@ import { getCallHistory, getVoicemails, getSms } from "../ringcentral.js";
 import { generateDraft, improveDraft } from "../gemini.js";
 import { getSettings, saveSettings, appendSignature } from "../settings.js";
 import { searchOrdersByEmail } from "../wix.js";
-import { lookupOrders, extractOrderNumbers } from "../shipstation.js";
+import { lookupOrders, extractOrderNumbers, extractEmails } from "../shipstation.js";
 import { lookupWayfairPos } from "../wayfair.js";
 import { lookupWalmartOrders, extractWalmartNumbers } from "../walmart.js";
 import { isBazaarvoiceAlert, parseAndDraft } from "../bazaarvoice.js";
@@ -70,6 +70,12 @@ router.post("/:id/draft", async (req, res) => {
     // order numbers mentioned in the subject + the customer's messages
     const orderText = `${ticket.subject || ""} ${conversation.filter((m) => m.direction !== "out").map((m) => m.text || "").join(" ")}`;
     const orderNums = extractOrderNumbers(orderText);
+    // who the ticket is from — forwarded tickets carry the shop mailbox as the
+    // sender and the real customer only inside the body, so take both
+    const who = {
+      emails: [ticket.customerEmail, ...extractEmails(orderText)].filter(Boolean),
+      names: [ticket.contactName, ticket.customerName].filter(Boolean),
+    };
     // retrieve KB, the customer's photos, their Wix store orders (by email),
     // and ShipStation shipments (by order number) — ground the reply in all
     const walmartNums = extractWalmartNumbers(orderText);
@@ -77,7 +83,7 @@ router.post("/:id/draft", async (req, res) => {
       retrieveRelevant({ ticket, conversation }, 8),
       fetchConversationImages(req.params.id, conversation),
       ticket.customerEmail ? searchOrdersByEmail(ticket.customerEmail).catch(() => []) : [],
-      orderNums.length ? lookupOrders(orderNums).catch(() => []) : [],
+      orderNums.length ? lookupOrders(orderNums, who).catch(() => []) : [],
       orderNums.length ? lookupWayfairPos(orderNums).catch(() => []) : [],
       walmartNums.length ? lookupWalmartOrders(walmartNums).catch(() => []) : [],
     ]);

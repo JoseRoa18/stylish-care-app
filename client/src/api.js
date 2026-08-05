@@ -69,7 +69,14 @@ export const api = {
   templates: () => req(`/templates`),
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
-  shipOrder: (number) => req(`/shipstation/order?number=${encodeURIComponent(number || "")}`),
+  // emails/names identify the ticket's customer — brands reuse order numbers,
+  // so without them we can't tell whose #16600 we found
+  shipOrder: (number, who = {}) =>
+    req(
+      `/shipstation/order?number=${encodeURIComponent(number || "")}` +
+        `&emails=${encodeURIComponent((who.emails || []).join(","))}` +
+        `&names=${encodeURIComponent((who.names || []).join(","))}`
+    ),
   wayfairPo: (numbers) => req(`/wayfair/po?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   walmartOrders: (numbers) => req(`/walmart/orders?numbers=${encodeURIComponent((numbers || []).join(","))}`),
   wayfairCancellations: (days = 14) => req(`/wayfair/cancellations?days=${days}`),

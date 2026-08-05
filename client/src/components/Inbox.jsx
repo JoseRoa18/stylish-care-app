@@ -1147,7 +1147,13 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
       const text = `${ticket.subject || ""} ${(res.conversation || []).filter((m) => m.direction !== "out").map((m) => m.text || "").join(" ")}`;
       const nums = extractOrderNums(text);
       if (nums.length) {
-        Promise.all(nums.slice(0, 2).map((n) => api.shipOrder(n).then((r) => r.orders || []).catch(() => [])))
+        // tell the server who this ticket is from — brands reuse order numbers,
+        // and forwarded tickets hide the real address inside the body
+        const who = {
+          emails: [ticket.customerEmail, ...new Set(text.match(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g) || [])].filter(Boolean),
+          names: [ticket.contactName].filter(Boolean),
+        };
+        Promise.all(nums.slice(0, 2).map((n) => api.shipOrder(n, who).then((r) => r.orders || []).catch(() => [])))
           .then((arr) => { const flat = arr.flat(); if (flat.length) setShipResults(flat); });
         const wfNums = nums.filter((n) => /^C[AS]\d{6,}$/i.test(n));
         if (wfNums.length) {
@@ -2134,14 +2140,28 @@ function extractOrderNums(text) {
 const SHIP_STATUS_COLOR = { shipped: "#3b7a57", "partially shipped": "#c8912a", "awaiting shipment": "#c8912a", "on hold": "#c8912a", cancelled: "#c0392b", canceled: "#c0392b" };
 
 function ShipmentCard({ s }) {
+  // brands number orders independently, so the same # can belong to someone
+  // else entirely — dim those and say so rather than showing them as equals
+  const other = !!s.otherCustomer;
   return (
-    <div className="card" style={{ padding: "10px 12px", marginBottom: 8 }}>
+    <div
+      className="card"
+      style={{ padding: "10px 12px", marginBottom: 8, ...(other ? { opacity: 0.62, borderStyle: "dashed" } : null) }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="mono" style={{ fontWeight: 700 }}>#{s.orderNumber}</span>
         <Pill text={s.status} color={SHIP_STATUS_COLOR[s.status]} />
         <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{s.channel}{s.account ? ` · ${s.account}` : ""}</span>
         <span style={{ fontSize: 11, color: "var(--ink-faint)", marginLeft: "auto" }}>{s.date || ""}</span>
       </div>
+      {s.recipient && (
+        <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 3 }}>{s.recipient}</div>
+      )}
+      {other && (
+        <div style={{ fontSize: 11.5, color: "#b06a2c", marginTop: 4 }}>
+          Different customer — same order number in another brand's store. Not this ticket.
+        </div>
+      )}
       {s.items?.length > 0 && (
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 5 }}>
           {s.items.map((i) => `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ""}`).join(" · ")}
