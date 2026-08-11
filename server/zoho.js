@@ -422,6 +422,8 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
         id: th.id,
         direction: th.direction,
         from: th.fromEmailAddress || "",
+        to: th.to || "",
+        cc: th.cc || "",
         author: th.author?.name || "",
         createdTime: th.createdTime,
         text: (th.summary || "").trim(),

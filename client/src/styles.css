@@ -107,6 +107,13 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .msg .who { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); margin-bottom: 5px; }
 .msg.out .who { color: var(--brass); }
 .msg .who .when { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-faint); white-space: nowrap; font-size: 10.5px; }
+/* From / To / Cc under each message header — who wrote to whom */
+.msg .addrs:not(:empty) { margin: -2px 0 7px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+.msg.out .addrs:not(:empty) { border-bottom-color: #ece2c9; }
+.msg .addr { display: flex; gap: 6px; font-size: 11px; line-height: 1.5; color: var(--ink-faint); }
+.msg .addr-k { flex: 0 0 30px; font-weight: 600; }
+.msg .addr-v { flex: 1; word-break: break-word; }
+.msg .addr-more { margin-left: 5px; padding: 0; border: 0; background: none; font: inherit; color: var(--brass); cursor: pointer; text-decoration: underline; }
 .msg .text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; color: var(--ink-soft); }
 .msg .text a { color: var(--brass); text-decoration: underline; }
 .convo-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }

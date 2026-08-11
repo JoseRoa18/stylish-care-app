@@ -1458,11 +1458,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                               <span>{m.direction === "out" ? "Agent" : "Customer"}{m.author ? ` · ${m.author}` : ""}</span>
                               {m.createdTime && <span className="when">{fmtTime(m.createdTime)}</span>}
                             </div>
-                            {m.cc && (
-                              <div style={{ fontSize: 10.5, color: "var(--ink-faint)", margin: "-2px 0 5px" }}>
-                                Cc: {m.cc.replace(/"/g, "")}
-                              </div>
-                            )}
+                            <div className="addrs">
+                              <AddrLine label="From" value={m.from} />
+                              <AddrLine label="To" value={m.to} />
+                              <AddrLine label="Cc" value={m.cc} />
+                            </div>
                             <div className="text">
                               {view === "orig" && m.html ? (
                                 <EmailHtml html={m.html} />
@@ -2138,6 +2138,60 @@ function extractOrderNums(text) {
 }
 
 const SHIP_STATUS_COLOR = { shipped: "#3b7a57", "partially shipped": "#c8912a", "awaiting shipment": "#c8912a", "on hold": "#c8912a", cancelled: "#c0392b", canceled: "#c0392b" };
+
+// Zoho hands these over raw — `"Customer Service"<care@stylishkb.com>` or a
+// bare `<a@b.com>`. Normalise to `Name <email>` / `email`.
+function fmtAddr(s) {
+  const t = String(s).replace(/["']/g, "").trim();
+  const m = t.match(/^(.*?)\s*<([^>]+)>$/);
+  if (!m) return t;
+  const name = m[1].trim();
+  const email = m[2].trim();
+  return !name || name.toLowerCase() === email.toLowerCase() ? email : `${name} <${email}>`;
+}
+
+// Split a recipient list without breaking on commas inside a display name or
+// inside the angle brackets ("Doe, John" <j@d.com>, b@c.com → two addresses).
+function splitAddrs(raw) {
+  const out = [];
+  let cur = "", angle = 0, quoted = false;
+  for (const ch of String(raw || "")) {
+    if (ch === '"') quoted = !quoted;
+    else if (ch === "<") angle++;
+    else if (ch === ">") angle = Math.max(0, angle - 1);
+    else if ((ch === "," || ch === ";") && !angle && !quoted) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map(fmtAddr).filter(Boolean);
+}
+
+// From / To / Cc on every message. "Agent"/"Customer" alone doesn't say who
+// actually wrote to whom once a thread is forwarded or has several parties.
+function AddrLine({ label, value }) {
+  const [open, setOpen] = useState(false);
+  const parts = splitAddrs(value);
+  if (!parts.length) return null;
+  const shown = open ? parts : parts.slice(0, 2);
+  const rest = parts.length - shown.length;
+  return (
+    <div className="addr">
+      <span className="addr-k">{label}</span>
+      <span className="addr-v" title={parts.join(", ")}>
+        {shown.join(", ")}
+        {rest > 0 && (
+          <button type="button" className="addr-more" onClick={() => setOpen(true)}>
+            +{rest} more
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
 
 function ShipmentCard({ s }) {
   // brands number orders independently, so the same # can belong to someone
