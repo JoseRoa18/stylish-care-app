@@ -306,6 +306,17 @@ export async function markTicketSpam(ticketId, isSpam = true) {
   });
 }
 
+// Bulk trash — Zoho's endpoint already takes a list, so a notification flood
+// can be cleared in batches instead of one API call per ticket.
+export async function moveTicketsToTrash(ticketIds) {
+  const ids = (ticketIds || []).map(String).filter(Boolean);
+  if (!ids.length) return null;
+  return zohoFetch("/tickets/moveToTrash", {
+    method: "POST",
+    body: JSON.stringify({ ticketIds: ids }),
+  });
+}
+
 // Move a ticket to the Zoho recycle bin (restorable from Zoho for ~60 days).
 export async function moveTicketToTrash(ticketId) {
   return zohoFetch(`/tickets/moveToTrash`, {
