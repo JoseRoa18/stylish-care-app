@@ -761,6 +761,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // status
   const [status, setStatusState] = useState(ticket.status);
   const [statusSaving, setStatusSaving] = useState(false);
+  const [undoFrom, setUndoFrom] = useState(null);   // status to restore after a quick close
+  const undoTimer = useRef(null);
+  useEffect(() => () => clearTimeout(undoTimer.current), []);
 
   // editable subject (#8) — fix unhelpful subjects like "Fw: please see"
   const [subj, setSubj] = useState(ticket.subject);
@@ -1231,12 +1234,32 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     setStatusSaving(true);
     try {
       await api.setStatus(ticket.id, next);
+      return true;
     } catch (e) {
       setStatusState(prev);
       setSendError(`Could not change status: ${e.message}`);
+      return false;
     } finally {
       setStatusSaving(false);
     }
+  };
+
+  // One-click close, straight from the list — the queue is mostly tickets that
+  // just need closing, and going through the status dropdown for each is slow.
+  // Undo stays up for a few seconds so a misclick costs nothing.
+  const quickClose = async () => {
+    const prev = status;
+    if (!(await changeStatus("Closed"))) return;
+    setUndoFrom(prev);
+    clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndoFrom(null), 10000);
+  };
+
+  const undoClose = async () => {
+    clearTimeout(undoTimer.current);
+    const back = undoFrom;
+    setUndoFrom(null);
+    await changeStatus(back);
   };
 
   const hasContent = draftHtml.replace(/<[^>]*>/g, "").trim().length > 0;
@@ -1332,6 +1355,29 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
           {sent && <span className="badge sent">Sent</span>}
           <WaitTimer since={ticket.customerResponseTime} status={status} />
           <StatusSelect status={status} options={statusOptions} onChange={changeStatus} saving={statusSaving} />
+          {undoFrom ? (
+            <button
+              className="btn sm"
+              title={`Reopen — back to "${undoFrom}"`}
+              disabled={statusSaving}
+              onClick={(e) => { e.stopPropagation(); undoClose(); }}
+              style={{ color: "var(--brass)", borderColor: "#e0cfa0" }}
+            >
+              Undo
+            </button>
+          ) : (
+            !/^closed/i.test(status) && (
+              <button
+                className="btn sm"
+                title="Close this ticket"
+                disabled={statusSaving}
+                onClick={(e) => { e.stopPropagation(); quickClose(); }}
+                style={{ color: "#3b7a57", borderColor: "#bcd3c4" }}
+              >
+                Close
+              </button>
+            )
+          )}
           {!/escalat/i.test(status) && (
             <button
               className="btn sm"
