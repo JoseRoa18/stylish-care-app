@@ -36,21 +36,26 @@ if (!SUBJECT || !FROM || !TO) {
 }
 
 // Supabase caps a select at 1000 rows, so page through the whole match set.
-const rows = [];
-for (let page = 0; ; page++) {
-  const { data, error } = await supabase
-    .from("tickets")
-    .select("id,number,subject,status")
-    .ilike("subject", `%${SUBJECT}%`)
-    .gte("created_time", FROM)
-    .lt("created_time", TO)
-    .order("id")
-    .range(page * 1000, page * 1000 + 999);
-  if (error) throw new Error(error.message);
-  if (!data?.length) break;
-  rows.push(...data);
-  if (data.length < 1000) break;
+async function findMatches() {
+  const rows = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabase
+      .from("tickets")
+      .select("id,number,subject,status")
+      .ilike("subject", `%${SUBJECT}%`)
+      .gte("created_time", FROM)
+      .lt("created_time", TO)
+      .order("id")
+      .range(page * 1000, page * 1000 + 999);
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  return rows;
 }
+
+const rows = await findMatches();
 
 console.log(`asunto contiene: "${SUBJECT}"`);
 console.log(`creados entre:   ${FROM} y ${TO}`);
@@ -68,20 +73,35 @@ if (!APPLY) {
   process.exit(0);
 }
 
-let trashed = 0;
-const failed = [];
-for (let i = 0; i < rows.length; i += BATCH) {
-  const chunk = rows.slice(i, i + BATCH).map((r) => r.id);
-  try {
-    await moveTicketsToTrash(chunk);
-    await supabase.from("tickets").delete().in("id", chunk);
-    trashed += chunk.length;
-  } catch (e) {
-    failed.push(...chunk);
-    console.log(`  lote ${Math.floor(i / BATCH) + 1} fallo: ${e.message.slice(0, 100)}`);
-    await new Promise((r) => setTimeout(r, 4000)); // back off, keep going
+async function purge(batchRows) {
+  let done = 0;
+  for (let i = 0; i < batchRows.length; i += BATCH) {
+    const chunk = batchRows.slice(i, i + BATCH).map((r) => r.id);
+    try {
+      await moveTicketsToTrash(chunk);
+      await supabase.from("tickets").delete().in("id", chunk);
+      done += chunk.length;
+    } catch (e) {
+      failed.push(...chunk);
+      console.log(`  lote ${Math.floor(i / BATCH) + 1} fallo: ${e.message.slice(0, 100)}`);
+      await new Promise((r) => setTimeout(r, 4000)); // back off, keep going
+    }
+    if (Math.floor(i / BATCH) % 10 === 0 || i + BATCH >= batchRows.length)
+      console.log(`  ${done}/${batchRows.length} a papelera${failed.length ? ` (${failed.length} fallidos)` : ""}`);
   }
-  if (Math.floor(i / BATCH) % 10 === 0 || i + BATCH >= rows.length)
-    console.log(`  ${trashed}/${rows.length} a papelera${failed.length ? ` (${failed.length} fallidos)` : ""}`);
+  return done;
 }
+
+// Re-query and repeat until nothing matches. A single pass can leave stragglers
+// behind — more mail lands while it runs, and the paged listing is taken before
+// the deletes start — so trusting one pass silently leaves tickets in the inbox.
+const failed = [];
+let trashed = 0;
+let pending = rows;
+for (let pass = 1; pending.length && pass <= 10; pass++) {
+  if (pass > 1) console.log(`\npasada ${pass}: quedan ${pending.length}`);
+  trashed += await purge(pending);
+  pending = (await findMatches()).filter((r) => !failed.includes(r.id));
+}
+if (pending.length) console.log(`\naviso: ${pending.length} siguen sin borrarse tras 10 pasadas`);
 console.log(`\nlisto — ${trashed} a la papelera de Zoho, ${failed.length} fallidos`);
