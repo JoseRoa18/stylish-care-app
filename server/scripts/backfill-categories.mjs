@@ -59,8 +59,13 @@ for (let i = 0; i < needsBody.length; i += DEEP_CONCURRENCY) {
   await Promise.all(
     needsBody.slice(i, i + DEEP_CONCURRENCY).map(async (r) => {
       try {
-        const convo = await getConversation(r.id, { maxThreads: 1 });
-        const first = (convo || []).find((m) => m.direction !== "out") || convo?.[0];
+        // Enough threads to reach the opening message: asking for one returns
+        // the LATEST, which is usually our own reply — classifying a ticket by
+        // what WE wrote ("your order has shipped") mislabels it every time.
+        const convo = await getConversation(r.id, { maxThreads: 6 });
+        const first = (convo || []).find((m) => m.direction !== "out");
+        // no inbound message at all → the subject alone is still better than
+        // handing the model our own words
         if (first?.text) { r.text = first.text; fetched++; }
       } catch {
         /* no body available — the subject alone will have to do */

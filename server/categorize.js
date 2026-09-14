@@ -39,6 +39,9 @@ const AUTOMATED = [
   /ra number notification/i,
   /is now cancelled/i,
   /new submission/i,
+  /^review stylish/i,            // our own outbound "please leave a review" mail
+  /reviews rejected/i,
+  /question posted by customer/i, // Bazaarvoice alert
   /out of office|automatic reply|undeliverable|delivery has failed/i,
   /unsubscribe|newsletter|webinar|black friday|busy season|best discounts/i,
 ];
