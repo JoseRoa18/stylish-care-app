@@ -96,7 +96,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 /* ── tickets ───────────────────────────────────────────── */
 /* bulk-action bar — only rendered when rows are checked */
 .bulk-bar {
-  position: sticky; top: 76px; z-index: 5;
+  position: sticky; top: var(--topbar-h, 118px); z-index: 6;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 10px 14px; margin-bottom: 12px;
   background: var(--brass-soft); border: 1px solid #e3d3b4; border-radius: var(--radius);
@@ -242,9 +242,14 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .msg.note-msg { align-self: stretch; max-width: 100%; background: var(--amber-soft); border-color: #e4d5ab; }
 .msg.note-msg .who { color: var(--amber); }
 
-/* dashboard period selector — one window for every panel below it */
+/* dashboard period selector — one window for every panel below it.
+   Sticks under the topbar: it governs every number on the page, so losing it
+   after a scroll leaves you reading figures without knowing their window.
+   --topbar-h is measured in App.jsx, since the topbar wraps at small widths. */
 .period-bar {
+  position: sticky; top: var(--topbar-h, 118px); z-index: 6;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 14px; margin-top: 4px;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }

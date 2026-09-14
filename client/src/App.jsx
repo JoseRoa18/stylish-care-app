@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, onAuthExpired } from "./api.js";
 import Dashboard from "./components/Dashboard.jsx";
 import Inbox from "./components/Inbox.jsx";
@@ -74,6 +74,21 @@ export default function App() {
     };
   }, [auth.authed]);
 
+  // The topbar is sticky, so anything else that sticks has to sit below it.
+  // Its height changes with the window (the connector row wraps), so measure it
+  // and publish it as a CSS variable instead of hard-coding an offset.
+  const topbarRef = useRef(null);
+  useEffect(() => {
+    const el = topbarRef.current;
+    if (!el) return;
+    const apply = () =>
+      document.documentElement.style.setProperty("--topbar-h", `${Math.round(el.offsetHeight)}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [auth.authed, tab]);
+
   const dot = (ok) => ({
     background: ok ? "var(--green)" : "var(--ink-faint)",
   });
@@ -86,7 +101,7 @@ export default function App() {
 
   return (
     <div className="shell">
-      <div className="topbar">
+      <div className="topbar" ref={topbarRef}>
         <div>
           <div className="brand">
             {/* the mark only — the lockup's tagline is Spanish and the UI is English */}
