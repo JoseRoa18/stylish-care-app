@@ -22,22 +22,34 @@ function waitColor(ms) {
   return h < 4 ? "#3b7a57" : h < 24 ? "#c8912a" : "#c0392b";
 }
 
+// One window for the whole page. 90 days is the default because a shorter one
+// leaves the resolution and satisfaction cards with too few tickets to mean
+// anything.
+const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90, "180d": 180, "365d": 365, all: 0 };
+const PERIOD_LABELS = { "7d": "7 days", "30d": "30 days", "90d": "90 days", "180d": "6 months", "365d": "1 year", all: "All time" };
+
 export default function Dashboard({ onOpenInbox }) {
   const [data, setData] = useState(null);
   const [fb, setFb] = useState(null);
   const [wf, setWf] = useState(null);
+  const [models, setModels] = useState(null);
+  const [csat, setCsat] = useState(null);
+  const [period, setPeriod] = useState("90d");
+  const [includeNotifications, setIncludeNotifications] = useState(false);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     const load = () => {
-      api.dashboard().then(setData).catch((e) => setErr(e.message));
+      api.dashboard({ period, includeNotifications }).then(setData).catch((e) => setErr(e.message));
       api.feedbackMetrics(90).then(setFb).catch(() => {});
       api.wayfairCancellations(14).then(setWf).catch(() => {});
+      api.modelReports(PERIOD_DAYS[period] || 0).then(setModels).catch(() => setModels(null));
+      api.surveyMetrics(90).then((r) => setCsat(r.metrics)).catch(() => setCsat(null));
     };
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
-  }, []);
+  }, [period, includeNotifications]);
 
   if (err) return <div className="banner error">Could not load dashboard: {err}</div>;
   if (!data) return <div className="empty"><span className="spin" /> Loading…</div>;
@@ -56,6 +68,28 @@ export default function Dashboard({ onOpenInbox }) {
         </div>
       )}
       {data.error && <div className="banner error">Zoho: {data.error}</div>}
+
+      {/* ── one window for every panel below ─────────────── */}
+      <div className="period-bar">
+        <span style={{ fontSize: 12, color: "var(--ink-faint)", textTransform: "uppercase", letterSpacing: ".06em" }}>Period</span>
+        {Object.entries(PERIOD_LABELS).map(([k, label]) => (
+          <button
+            key={k}
+            className={`btn sm ${period === k ? "primary" : ""}`}
+            onClick={() => setPeriod(k)}
+            style={{ fontSize: 11, padding: "3px 10px" }}
+          >
+            {label}
+          </button>
+        ))}
+        <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--ink-soft)", cursor: "pointer" }}>
+          <input type="checkbox" checked={includeNotifications} onChange={(e) => setIncludeNotifications(e.target.checked)} />
+          Include automated notifications
+          {data.notifications > 0 && (
+            <span style={{ color: "var(--ink-faint)" }}>({data.notifications} hidden)</span>
+          )}
+        </label>
+      </div>
 
       {/* ── headline metrics ─────────────────────────────── */}
       <div className="grid cards-4" style={{ marginTop: 8 }}>
@@ -145,6 +179,12 @@ export default function Dashboard({ onOpenInbox }) {
           )}
         </div>
       )}
+
+      {/* ── satisfaction (post-close survey) ─────────────── */}
+      <SatisfactionPanel m={csat} />
+
+      {/* ── which models drive the support load ──────────── */}
+      <ModelReports reports={models} />
 
       {/* ── AI reply quality (feedback loop) ─────────────── */}
       <div className="card" style={{ marginTop: 16 }}>
@@ -281,6 +321,119 @@ function AvgResolutionCard({ defaultAvgMs, defaultCount, targetHours }) {
 function targetColor(ms, targetHours) {
   if (ms == null || !targetHours) return undefined;
   return ms <= targetHours * 3600000 ? "var(--green)" : "var(--red)";
+}
+
+// What customers said after their ticket was closed. "Satisfaction rate" is the
+// share rating 4 or 5 — the standard CSAT definition, so it can be compared to
+// a benchmark rather than only to itself.
+function SatisfactionPanel({ m }) {
+  if (!m) {
+    return (
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="chart-title">Satisfaction</div>
+        <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>
+          Not set up yet — run <code>supabase/surveys.sql</code> in the Supabase SQL editor. After that every
+          closed ticket emails the customer a three-question survey.
+        </div>
+      </div>
+    );
+  }
+  if (!m.answered) {
+    return (
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="chart-title">Satisfaction · last 90 days</div>
+        <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>
+          {m.sent ? `${m.sent} survey${m.sent > 1 ? "s" : ""} sent, no answers yet.` : "No surveys sent yet — they go out when a ticket is closed."}
+        </div>
+      </div>
+    );
+  }
+  const rate = m.satisfactionRate;
+  const bars = [5, 4, 3, 2, 1];
+  const max = Math.max(1, ...bars.map((s) => m.stars?.[s] || 0));
+  const resolvedTotal = (m.resolvedYes || 0) + (m.resolvedPartly || 0) + (m.resolvedNo || 0);
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="chart-title">
+        Satisfaction · last 90 days
+        <span style={{ fontWeight: 400, color: "var(--ink-faint)", fontSize: 11, marginLeft: 8 }}>
+          {m.answered} of {m.sent} answered
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 24, marginTop: 10, alignItems: "center" }}>
+        <div>
+          <div style={{ fontFamily: "Fraunces, serif", fontSize: 44, lineHeight: 1.1, color: rate >= 80 ? "var(--green)" : rate >= 60 ? "var(--amber)" : "var(--red)" }}>
+            {rate}%
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-faint)", textTransform: "uppercase", letterSpacing: ".06em" }}>rated 4 or 5</div>
+          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 8 }}>
+            {m.avgSatisfaction} avg · {m.avgSpeed} on speed
+          </div>
+        </div>
+        <div>
+          {bars.map((s) => (
+            <div key={s} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+              <span style={{ width: 34, fontSize: 12, color: "var(--ink-faint)", textAlign: "right" }}>{s}★</span>
+              <div style={{ flex: 1, background: "var(--line-soft)", borderRadius: 5, height: 14 }}>
+                <div style={{ width: `${((m.stars?.[s] || 0) / max) * 100}%`, height: "100%", background: s >= 4 ? "var(--green)" : s === 3 ? "var(--amber)" : "var(--red)", borderRadius: 5, minWidth: (m.stars?.[s] || 0) ? 4 : 0 }} />
+              </div>
+              <span className="mono" style={{ width: 26, fontSize: 12, textAlign: "right" }}>{m.stars?.[s] || 0}</span>
+            </div>
+          ))}
+          {resolvedTotal > 0 && (
+            <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 10 }}>
+              Issue resolved: <b>{m.resolvedYes}</b> yes · {m.resolvedPartly} partly · <b>{m.resolvedNo}</b> no
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Which models generate spare-part demand and which come back defective.
+// The sample size is printed next to every list on purpose: a model only
+// appears when someone typed its code, so these are a directional read on
+// support load, not a failure rate — and at these counts a difference of one
+// or two tickets is noise.
+function ModelReports({ reports }) {
+  if (!reports) return null;
+  const list = (rows) => {
+    if (!rows.length) return <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>No tickets named a model in this window.</div>;
+    const max = Math.max(...rows.map((r) => r.count));
+    return (
+      <div style={{ marginTop: 8 }}>
+        {rows.map((r) => (
+          <div key={r.model} style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0" }}>
+            <span className="mono" style={{ width: 86, fontSize: 12, textAlign: "right", flexShrink: 0 }}>{r.model}</span>
+            <div style={{ flex: 1, background: "var(--line-soft)", borderRadius: 6, height: 16 }}>
+              <div style={{ width: `${(r.count / max) * 100}%`, height: "100%", background: "var(--brass)", borderRadius: 6, minWidth: 4 }} />
+            </div>
+            <span className="mono" style={{ width: 26, fontSize: 12, textAlign: "right" }}>{r.count}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+  const total = (rows) => rows.reduce((n, r) => n + r.count, 0);
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+      <div className="card">
+        <div className="chart-title">Spare parts & warranty · by model</div>
+        {list(reports.parts)}
+        <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 8 }}>
+          {total(reports.parts)} tickets that named a model
+        </div>
+      </div>
+      <div className="card">
+        <div className="chart-title">Defects & wrong items · by model</div>
+        {list(reports.defects)}
+        <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 8 }}>
+          {total(reports.defects)} tickets that named a model — too few to rank confidently
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Metric({ label, value, sub, color }) {

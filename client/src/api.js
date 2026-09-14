@@ -26,7 +26,10 @@ export const api = {
   login: (password) =>
     req("/login", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req("/logout", { method: "POST" }),
-  dashboard: () => req("/dashboard"),
+  dashboard: ({ period = "90d", includeNotifications = false } = {}) =>
+    req(`/dashboard?period=${encodeURIComponent(period)}${includeNotifications ? "&notifications=include" : ""}`),
+  modelReports: (days = 0) => req(`/metrics/models?days=${days}`),
+  surveyMetrics: (days = 90) => req(`/survey/metrics?days=${days}`),
   inbox: ({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) =>
     req(`/inbox?view=${encodeURIComponent(view)}&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}&sort=${sort}`),
   tickets: () => req("/tickets"),

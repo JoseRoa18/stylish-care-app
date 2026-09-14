@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How did we do? · WeCare</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <style>
+      :root { --ink:#1f1d1a; --soft:#57534d; --faint:#8a857c; --paper:#f6f3ec; --card:#fffdf8; --line:#e4ddd0; --brass:#9a6b2f; --gold:#c8a24a; --green:#4a7a52; }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+      .wrap { max-width:560px; margin:0 auto; padding:40px 20px 60px; }
+      .brand { display:flex; align-items:center; gap:10px; margin-bottom:28px; }
+      .brand img { width:30px; height:30px; }
+      .brand b { font-size:19px; letter-spacing:-0.01em; }
+      .brand span { font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.08em; }
+      .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:26px 24px; box-shadow:0 1px 2px rgba(31,29,26,.04),0 8px 24px rgba(31,29,26,.05); }
+      h1 { font-size:21px; margin:0 0 6px; }
+      .sub { color:var(--faint); font-size:14px; margin:0 0 26px; }
+      .q { margin-bottom:26px; }
+      .q p { margin:0 0 10px; font-weight:600; font-size:15px; }
+      .stars { display:flex; gap:6px; }
+      .star { font-size:34px; line-height:1; color:var(--line); background:none; border:0; padding:0 2px; cursor:pointer; transition:color .12s, transform .12s; }
+      .star:hover, .star.on { color:var(--gold); }
+      .star:hover { transform:scale(1.12); }
+      .opts { display:flex; gap:8px; flex-wrap:wrap; }
+      .opt { padding:9px 18px; border:1px solid var(--line); border-radius:999px; background:var(--card); font:inherit; font-size:14px; color:var(--soft); cursor:pointer; }
+      .opt:hover { border-color:var(--faint); }
+      .opt.on { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+      .send { width:100%; padding:13px; border:0; border-radius:10px; background:var(--ink); color:var(--paper); font:inherit; font-weight:600; font-size:15px; cursor:pointer; }
+      .send:disabled { opacity:.4; cursor:not-allowed; }
+      .msg { text-align:center; padding:14px 0; }
+      .msg .big { font-size:40px; }
+      .foot { text-align:center; color:var(--faint); font-size:12px; margin-top:22px; }
+      .err { color:#a8473c; font-size:14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <img src="/icon.svg" alt="" />
+        <div>
+          <b>WeCare</b><br /><span>Stylish Customer Care</span>
+        </div>
+      </div>
+      <div class="card" id="root">Loading…</div>
+      <p class="foot">Stylish International Inc.</p>
+    </div>
+
+    <script>
+      const token = new URLSearchParams(location.search).get("t") || "";
+      const root = document.getElementById("root");
+      const answer = { resolved: null, satisfaction: null, speed: null };
+
+      const RESOLVED = [
+        ["yes", "Yes"],
+        ["partly", "Partly"],
+        ["no", "No"],
+      ];
+
+      function thanks(already) {
+        root.innerHTML =
+          '<div class="msg"><div class="big">✓</div><h1>Thank you</h1>' +
+          '<p class="sub" style="margin:0">' +
+          (already ? "We already have your answer — thank you for taking the time." : "Your feedback goes straight to the team that handled your case.") +
+          "</p></div>";
+      }
+
+      function stars(name) {
+        return (
+          '<div class="stars" data-q="' + name + '">' +
+          [1, 2, 3, 4, 5].map((n) => '<button class="star" data-v="' + n + '" aria-label="' + n + ' of 5">★</button>').join("") +
+          "</div>"
+        );
+      }
+
+      function render(survey) {
+        root.innerHTML =
+          "<h1>How did we do?</h1>" +
+          '<p class="sub">Three quick questions about ticket #' + (survey.ticket_number || "") + ". No typing needed.</p>" +
+          '<div class="q"><p>Did we resolve your issue?</p><div class="opts" data-q="resolved">' +
+          RESOLVED.map(([v, l]) => '<button class="opt" data-v="' + v + '">' + l + "</button>").join("") +
+          "</div></div>" +
+          '<div class="q"><p>How satisfied are you with the support you received?</p>' + stars("satisfaction") + "</div>" +
+          '<div class="q"><p>How quickly did we get back to you?</p>' + stars("speed") + "</div>" +
+          '<button class="send" id="send" disabled>Send</button>' +
+          '<p class="err" id="err"></p>';
+
+        // pre-fill whatever the one-click star from the email already recorded
+        if (survey.satisfaction) pick("satisfaction", survey.satisfaction);
+        if (survey.speed) pick("speed", survey.speed);
+        if (survey.resolved) pick("resolved", survey.resolved);
+
+        root.querySelectorAll(".stars").forEach((row) =>
+          row.addEventListener("click", (e) => {
+            const b = e.target.closest(".star");
+            if (b) pick(row.dataset.q, Number(b.dataset.v));
+          })
+        );
+        root.querySelector('[data-q="resolved"]').addEventListener("click", (e) => {
+          const b = e.target.closest(".opt");
+          if (b) pick("resolved", b.dataset.v);
+        });
+        document.getElementById("send").addEventListener("click", send);
+      }
+
+      function pick(q, v) {
+        answer[q] = v;
+        const row = root.querySelector('[data-q="' + q + '"]');
+        if (!row) return;
+        if (row.classList.contains("stars")) {
+          row.querySelectorAll(".star").forEach((s) => s.classList.toggle("on", Number(s.dataset.v) <= v));
+        } else {
+          row.querySelectorAll(".opt").forEach((o) => o.classList.toggle("on", o.dataset.v === v));
+        }
+        // any single answer is worth keeping — don't force all three
+        document.getElementById("send").disabled = !(answer.resolved || answer.satisfaction || answer.speed);
+      }
+
+      async function send() {
+        const btn = document.getElementById("send");
+        btn.disabled = true;
+        btn.textContent = "Sending…";
+        try {
+          const res = await fetch("/api/survey/" + encodeURIComponent(token), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(answer),
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save");
+          thanks(false);
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "Send";
+          document.getElementById("err").textContent = e.message;
+        }
+      }
+
+      (async () => {
+        if (!token) return (root.innerHTML = '<p class="err">This link is missing its code. Please use the link from our email.</p>');
+        try {
+          const res = await fetch("/api/survey/" + encodeURIComponent(token));
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "This survey link is not valid.");
+          const { survey } = await res.json();
+          render(survey);
+        } catch (e) {
+          root.innerHTML = '<p class="err">' + e.message + "</p>";
+        }
+      })();
+    </script>
+  </body>
+</html>

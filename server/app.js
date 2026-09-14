@@ -30,6 +30,9 @@ import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThr
 import { walmartConfigured, lookupWalmartOrders } from "./walmart.js";
 import { categorizePending, CATEGORIES } from "./categorize.js";
 import { getSettings } from "./settings.js";
+import { dashboardData } from "./dashboard.js";
+import { detectPending, modelReport } from "./models.js";
+import { sendSurvey, getSurvey, answerSurvey, surveyMetrics, QUESTIONS } from "./surveys.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -57,12 +60,6 @@ function weekStartUTC(d) {
   dt.setUTCDate(dt.getUTCDate() - dow);
   dt.setUTCHours(0, 0, 0, 0);
   return dt;
-}
-
-// category RPC rows → { category: count }. Null when the migration hasn't run.
-function catCounts(rows) {
-  if (!rows?.data) return null;
-  return Object.fromEntries(rows.data.map((r) => [r.category, Number(r.count)]));
 }
 
 // Average resolution time bucketed by the week a ticket was CLOSED, last N weeks.
@@ -147,6 +144,47 @@ export function createApp() {
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
+  });
+
+  // ── satisfaction survey (PUBLIC — the customer has no login) ──
+  // The token in the link is the only credential, so these routes sit above the
+  // auth gate and can only ever touch the one survey the token names.
+
+  // MUST stay above /api/survey/:token — otherwise Express matches "metrics"
+  // as a token and the dashboard asks for a survey that does not exist.
+  app.get("/api/survey/metrics", requireAuth, async (req, res) => {
+    try {
+      res.json({ metrics: await surveyMetrics(Number(req.query.days) || 90) });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/survey/:token", async (req, res) => {
+    try {
+      const s = await getSurvey(req.params.token);
+      if (!s) return res.status(404).json({ error: "This survey link is not valid." });
+      res.json({ survey: s, questions: QUESTIONS });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/survey/:token", async (req, res) => {
+    try {
+      res.json(await answerSurvey(req.params.token, req.body || {}));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // One-click answer straight from the email, then land on the form to finish.
+  app.get("/api/survey/:token/quick", async (req, res) => {
+    const { q, v } = req.query;
+    try {
+      await answerSurvey(req.params.token, { [q]: v });
+    } catch { /* fall through to the form either way */ }
+    res.redirect(`/survey.html?t=${encodeURIComponent(req.params.token)}`);
   });
 
   // ── Zoho SalesIQ (website chat bot) webhook ────────────────
@@ -318,59 +356,32 @@ export function createApp() {
     });
   });
 
-  app.get("/api/dashboard", async (_req, res) => {
+  // Every panel honours ?period= and ?notifications=include, so the whole page
+  // answers one window instead of each card having its own (or none).
+  app.get("/api/dashboard", async (req, res) => {
     try {
       await maybeSync(); // keep the tickets table fresh (throttled to ~2 min)
-      const [kb, metrics, byStatusRows, byChannelRows, perDayRows, openWaitRows, byCatRows, awaitingCatRows, settings] =
-        await Promise.all([
-          sourceCounts(),
-          supabase.rpc("ticket_metrics"),
-          supabase.rpc("tickets_by_status"),
-          supabase.rpc("tickets_by_channel"),
-          supabase.rpc("tickets_per_day", { num_days: 7 }),
-          // wait times for open-TYPE tickets only — Awaiting Response means the
-          // ball is in the CUSTOMER's court, so it doesn't belong in "avg wait"
-          supabase.from("tickets").select("customer_response_time").in("status", ["Open", "Escalated"]),
-          // categories come back empty until supabase/categories.sql is run —
-          // the rest of the dashboard must not fail because of that
-          supabase.rpc("tickets_by_category", { num_days: 0 }).then((r) => r, () => ({ data: null })),
-          supabase.rpc("awaiting_by_category").then((r) => r, () => ({ data: null })),
-          getSettings().catch(() => ({ targets: null })),
-        ]);
+      const period = String(req.query.period || "90d");
+      const includeNotifications = req.query.notifications === "include";
+      const [data, kb, settings] = await Promise.all([
+        dashboardData({ period, includeNotifications }),
+        sourceCounts().catch(() => ({ total: 0 })),
+        getSettings().catch(() => ({ targets: null })),
+      ]);
       // label whatever arrived since the last visit, in the background
       categorizePending({ limit: 60 }).catch(() => {});
-      const m = metrics.data || {};
-      const round = (x) => (x != null ? Math.round(Number(x)) : null);
-      const byStatus = Object.fromEntries(
-        (byStatusRows.data || []).map((r) => [r.status, Number(r.count)])
-      );
-      const byChannel = Object.fromEntries(
-        (byChannelRows.data || []).map((r) => [r.channel, Number(r.count)])
-      );
-      // What Zoho's "Open Tickets" view counts: open-TYPE statuses (Open +
-      // Escalated). Awaiting Response / Wayfair / Pending Return are
-      // on-hold-type there, so they don't belong in the headline number.
-      const openNow = Object.entries(byStatus)
-        .filter(([s]) => /^(open|escalated)$/i.test(s))
-        .reduce((n, [, c]) => n + c, 0);
-      const waits = (openWaitRows.data || [])
-        .filter((r) => r.customer_response_time)
-        .map((r) => Date.now() - new Date(r.customer_response_time).getTime())
-        .filter((ms) => ms >= 0);
-      const openAvgWaitMs = waits.length ? waits.reduce((s, x) => s + x, 0) / waits.length : null;
-      const openOldestWaitMs = waits.length ? Math.max(...waits) : null;
-      const lbl = (day) => new Date(day + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-      const perDay = (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: Number(r.count) }));
-      // RingCentral inbound calls per day, aligned to the same 7 days
-      const callsByDay = ringcentralConfigured() ? await getCallsPerDay({ days: 7 }).catch(() => ({})) : null;
-      const callsPerDay = callsByDay
-        ? (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: callsByDay[r.day] || 0 }))
-        : null;
+      detectPending({ limit: 200 }).catch(() => {});
+
+      // RingCentral calls, aligned to the last 7 buckets of the ticket series
+      const tail = data.perDay.slice(-7);
+      const callsByDay = ringcentralConfigured() ? await getCallsPerDay({ days: 7 }).catch(() => null) : null;
+      const callsPerDay = callsByDay ? tail.map((p) => ({ label: p.label, count: callsByDay[p.date] || 0 })) : null;
       const combinedPerDay = callsByDay
-        ? (perDayRows.data || []).map((r) => ({ label: lbl(r.day), count: Number(r.count) + (callsByDay[r.day] || 0) }))
+        ? tail.map((p) => ({ label: p.label, count: p.count + (callsByDay[p.date] || 0) }))
         : null;
 
-      // weekly avg resolution (last 8 weeks) — computed in JS, no migration
+      // Weekly resolution keeps its own fixed 8-week window: it is a trend
+      // line, so rescaling it with the period selector would defeat the point.
       const weeksBack = 8;
       const since = new Date(Date.now() - weeksBack * 7 * 86400000).toISOString();
       const { data: resRows } = await supabase
@@ -379,34 +390,36 @@ export function createApp() {
         .ilike("status", "%closed%")
         .gte("closed_time", since)
         .not("closed_time", "is", null);
-      const resolutionByWeek = weeklyResolution(resRows || [], weeksBack);
 
       res.json({
+        ...data,
         zoho: zohoConfigured(),
-        dropbox: dropboxConfigured(),
         gemini: geminiConfigured(),
         kbArticles: kb.total,
-        total: m.total || 0,
-        active: m.active || 0,
-        openNow,
-        closed: m.closed || 0,
-        byStatus,
-        byChannel,
-        avgWaitMs: round(openAvgWaitMs),
-        oldestWaitMs: round(openOldestWaitMs),
-        avgResolutionMs: round(m.avgResolutionMs),
-        resolvedSample: m.resolvedSample || 0,
-        perDay,
         callsPerDay,
         combinedPerDay,
-        resolutionByWeek,
-        byCategory: catCounts(byCatRows),
-        awaitingByCategory: catCounts(awaitingCatRows),
+        resolutionByWeek: weeklyResolution(resRows || [], weeksBack),
         categoryLabels: CATEGORIES,
         targets: settings?.targets || null,
         lastFetch: new Date().toISOString(),
         error: null,
       });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Which models generate the most spare-part demand, and which come back
+  // defective. Counts are TICKETS that named a model, not units sold — the
+  // response says how many so the number is never read as a failure rate.
+  app.get("/api/metrics/models", async (req, res) => {
+    try {
+      const days = Number(req.query.days) || 0;
+      const [parts, defects] = await Promise.all([
+        modelReport({ days, categories: ["parts_warranty"] }),
+        modelReport({ days, categories: ["defective", "missing_parts", "packaging"] }),
+      ]);
+      res.json({ days, parts: parts.slice(0, 12), defects: defects.slice(0, 12) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

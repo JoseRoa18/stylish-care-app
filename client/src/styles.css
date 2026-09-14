@@ -241,3 +241,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 /* internal note bubble in the conversation */
 .msg.note-msg { align-self: stretch; max-width: 100%; background: var(--amber-soft); border-color: #e4d5ab; }
 .msg.note-msg .who { color: var(--amber); }
+
+/* dashboard period selector — one window for every panel below it */
+.period-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px; margin-top: 4px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+}

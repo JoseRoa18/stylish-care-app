@@ -34,6 +34,8 @@ import { isBazaarvoiceAlert, parseAndDraft } from "../bazaarvoice.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
 import { recordFeedback } from "../feedback.js";
+import { sendSurvey } from "../surveys.js";
+import { supabase } from "../supabase.js";
 
 const router = Router();
 
@@ -413,7 +415,21 @@ router.post("/:id/status", async (req, res) => {
     const next = result?.status || status;
     // Mirror it into the synced table so the inbox list stays consistent.
     try { await touchStatus(req.params.id, next); } catch { /* next sync fixes it */ }
-    res.json({ ok: true, status: next });
+
+    // Closing a ticket sends the customer the satisfaction survey. It runs
+    // after the response and never throws: a survey that cannot be sent must
+    // not make closing a ticket fail, and the row is keyed on the ticket so a
+    // second close sends nothing.
+    let survey = null;
+    if (/closed/i.test(next)) {
+      const { data: row } = await supabase
+        .from("tickets")
+        .select("id,number,customer_email,customer_name,category")
+        .eq("id", req.params.id)
+        .maybeSingle();
+      survey = await sendSurvey(row).catch((e) => ({ sent: false, skipped: e.message }));
+    }
+    res.json({ ok: true, status: next, survey });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
