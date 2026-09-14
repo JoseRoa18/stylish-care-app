@@ -151,12 +151,43 @@ function normalizeUrl(u) {
   return String(u || "").trim().replace(/[.,;!?]+$/, "").toLowerCase();
 }
 
-export function sanitizeReplyLinks(replyHtml, kb = [], conversation = []) {
+// Domains we are willing to send a customer to. A URL still has to appear in
+// the retrieved KB to be used at all — this list is the second gate, because
+// KB bodies carry junk scraped along with the text: a video description left
+// `eoun.com/track/like-falling` in one article and `stylsihkb.com` (a typo'd
+// domain) in another. Grounded is not the same as safe to send.
+const TRUSTED_LINK_HOSTS = [
+  "stylishkb.com", "sinksdirect.ca", "sinksdirectusa.com",
+  "youtube.com", "youtu.be",
+  "ups.com", "fedex.com", "usps.com", "purolator.com", "canpar.com",
+  "canadapost-postescanada.ca", "dhl.com",
+];
+
+function trustedHost(u) {
+  const host = (String(u).match(/^https?:\/\/([^/]+)/i) || [])[1];
+  if (!host) return false;
+  const h = host.toLowerCase().replace(/^www\./, "");
+  return TRUSTED_LINK_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
+// `extraUrls` are links WE generated from live order data (carrier tracking).
+// They never appear in the KB or the conversation, so without this they were
+// stripped and agents pasted the tracking link in by hand.
+export function sanitizeReplyLinks(replyHtml, kb = [], conversation = [], extraUrls = []) {
   const allowed = new Set();
+  const offer = (u) => {
+    if (u && trustedHost(u)) allowed.add(normalizeUrl(u));
+  };
   for (const a of kb) {
-    if (a.source === "youtube" && a.sourceUrl) allowed.add(normalizeUrl(a.sourceUrl));
+    // every retrieved article's own source, not just YouTube's — the spare
+    // parts page and the policy pages live on the web/template articles
+    offer(a.sourceUrl);
+    // and any link written inside the article body, same trust gate
+    for (const u of String(a.body || a.text || "").match(URL_RE) || []) offer(u);
   }
+  for (const u of extraUrls) allowed.add(normalizeUrl(u));
   for (const m of conversation) {
+    // whatever the customer or agent already used here is fair game verbatim
     for (const u of String(m.text || "").match(URL_RE) || []) allowed.add(normalizeUrl(u));
   }
 
@@ -332,7 +363,14 @@ Write the reply and triage the ticket now.`;
   // Hard safety net: strip any URL the model didn't copy verbatim from the KB
   // (or the conversation). If we had to remove one, the draft loses fast-lane
   // status so a human double-checks the now-linkless sentence.
-  const { reply, removedLinks } = sanitizeReplyLinks(parsed.reply || "", kb, conversation);
+  // tracking links we built ourselves from the order data are verified by
+  // construction, so they count as allowed alongside the KB
+  const trackingUrls = [
+    ...shipments.flatMap((s) => (s.tracking || []).map((t) => t.url)),
+    ...wayfairPos.flatMap((p) => (p.tracking || []).map((t) => t?.url)),
+    ...walmartOrders.flatMap((o) => (o.items || []).map((i) => i?.trackingUrl)),
+  ].filter(Boolean);
+  const { reply, removedLinks } = sanitizeReplyLinks(parsed.reply || "", kb, conversation, trackingUrls);
   if (removedLinks && route.lane === "ready") {
     route = { lane: "review", label: "Needs review — removed an unverified link" };
   }
