@@ -12,6 +12,7 @@ import { ingestWeb } from "../sources/web.js";
 import { ingestYouTube, youtubeConfigured } from "../sources/youtube.js";
 import { ingestTemplates, templatesConfigured } from "../sources/templates.js";
 import { ingestDropbox, dropboxConfigured } from "../dropbox.js";
+import { ingestWixProducts, wixProductsConfigured } from "../sources/wix-products.js";
 import { zohoConfigured } from "../zoho.js";
 import { buildIndex } from "../kb-index.js";
 import { embeddingsConfigured } from "../embeddings.js";
@@ -31,6 +32,7 @@ router.get("/sources", async (_req, res) => {
       zoho: zohoConfigured(),
       youtube: youtubeConfigured(),
       templates: templatesConfigured(),
+      "wix-products": wixProductsConfigured(),
     },
   });
 });
@@ -60,6 +62,7 @@ const INGESTERS = {
   youtube: { run: ingestYouTube, source: "youtube" },
   dropbox: { run: ingestDropbox, source: "dropbox" },
   "zoho-templates": { run: ingestTemplates, source: "zoho-template" },
+  "wix-products": { run: ingestWixProducts, source: "product" },
 };
 
 // Ingestion runs as a single background job (it can take many minutes for

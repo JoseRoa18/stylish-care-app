@@ -169,6 +169,15 @@ export default function KnowledgeBase() {
             </button>
             <button
               className="btn sm"
+              disabled={!!ingesting || !connectors["wix-products"]}
+              title={connectors["wix-products"] ? "Catalogue specs: dimensions, features, matching accessories" : "Set WIX_API_KEY + WIX_ACCOUNT_ID in .env"}
+              onClick={() => ingest("wix-products", "Wix products")}
+            >
+              {ingesting === "wix-products" ? "Importing…" : "↻ Import product catalogue"}
+              {!connectors["wix-products"] && " (not connected)"}
+            </button>
+            <button
+              className="btn sm"
               disabled={!!ingesting || !connectors.templates}
               title={connectors.templates ? "" : "Place the Zoho export at server/data/zoho-templates.txt"}
               onClick={() => ingest("zoho-templates", "Zoho templates")}

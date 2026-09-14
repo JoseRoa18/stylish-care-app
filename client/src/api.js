@@ -148,6 +148,7 @@ export const KB_SOURCES = {
   // "dropbox" is deliberately absent — those articles fall back to the Manual
   // badge, so the KB no longer advertises where a document happened to live.
   "zoho-template": { label: "Template", color: "#c8a24a" },
+  product: { label: "Product", color: "#2f6f9a" },
   youtube: { label: "Video", color: "#ff0033" },
   "resolved-ticket": { label: "Resolved case", color: "#7a5cff" },
 };

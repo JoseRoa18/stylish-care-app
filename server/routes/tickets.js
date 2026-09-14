@@ -79,15 +79,19 @@ router.post("/:id/draft", async (req, res) => {
     // retrieve KB, the customer's photos, their Wix store orders (by email),
     // and ShipStation shipments (by order number) — ground the reply in all
     const walmartNums = extractWalmartNumbers(orderText);
-    const [kb, images, orders, shipments, wayfairPos, walmartOrders] = await Promise.all([
+    const [kb, images, orders, shipments, wayfairPos, walmartOrders, notes] = await Promise.all([
       retrieveRelevant({ ticket, conversation }, 8),
       fetchConversationImages(req.params.id, conversation),
       ticket.customerEmail ? searchOrdersByEmail(ticket.customerEmail).catch(() => []) : [],
       orderNums.length ? lookupOrders(orderNums, who).catch(() => []) : [],
       orderNums.length ? lookupWayfairPos(orderNums).catch(() => []) : [],
       walmartNums.length ? lookupWalmartOrders(walmartNums).catch(() => []) : [],
+      // the team's own notes on the ticket — where a decision that was already
+      // made ("approved a full refund") is written down, if it is written down
+      // anywhere. Without these the draft can contradict what was agreed.
+      listTicketComments(req.params.id).catch(() => []),
     ]);
-    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos, walmartOrders, instructions });
+    const result = await generateDraft({ ticket, conversation, kb, images, orders, shipments, wayfairPos, walmartOrders, notes, instructions });
     // append the official signature so every AI draft ends consistently
     try {
       const { signature } = await getSettings();
@@ -143,6 +147,9 @@ router.put("/settings", async (req, res) => {
   try {
     const patch = {};
     if (typeof req.body.signature === "string") patch.signature = req.body.signature;
+    // saveSettings validates the numbers; without this the targets the
+    // Settings dialog sends were silently dropped
+    if (req.body.targets && typeof req.body.targets === "object") patch.targets = req.body.targets;
     res.json(await saveSettings(patch));
   } catch (err) {
     res.status(502).json({ error: err.message });

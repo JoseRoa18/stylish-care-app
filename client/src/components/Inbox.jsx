@@ -31,6 +31,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
   const [syncWarning, setSyncWarning] = useState(null);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [picked, setPicked] = useState(new Set()); // bulk-action selection
 
   const [view, setView] = useState("open");
   const [sort, setSort] = useState("updated");
@@ -249,17 +250,34 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
           </div>
         </div>
       ) : (
-        shown.map((t) => (
-          <AnyTicketRow
-            key={t.id}
-            ticket={t}
-            statusOptions={statusOptions}
-            signature={signature}
-            open={openId === t.id}
-            onToggle={() => setOpenId(openId === t.id ? null : t.id)}
-            onChanged={load}
+        <>
+          <BulkBar
+            ids={[...picked]}
+            allIds={shown.map((t) => t.id)}
+            onClear={() => setPicked(new Set())}
+            onPickAll={(ids) => setPicked(new Set(ids))}
+            onDone={() => { setPicked(new Set()); load(); }}
           />
-        ))
+          {shown.map((t) => (
+            <AnyTicketRow
+              key={t.id}
+              ticket={t}
+              statusOptions={statusOptions}
+              signature={signature}
+              open={openId === t.id}
+              onToggle={() => setOpenId(openId === t.id ? null : t.id)}
+              onChanged={load}
+              selected={picked.has(t.id)}
+              onSelect={(id, on) =>
+                setPicked((prev) => {
+                  const next = new Set(prev);
+                  on ? next.add(id) : next.delete(id);
+                  return next;
+                })
+              }
+            />
+          ))}
+        </>
       )}
 
       <Lightbox />
@@ -730,13 +748,54 @@ function BestBuyTicketRow({ ticket, open, onToggle }) {
 }
 
 // Picks the right renderer: Zoho ticket or Best Buy marketplace thread.
+// Bulk actions over the checked rows. Clearing a queue one ticket at a time is
+// the slow part of triage, so this closes them in one pass — sequentially, to
+// stay inside Zoho's rate limit, and it reports what failed instead of
+// pretending everything worked.
+function BulkBar({ ids, allIds, onClear, onPickAll, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(0);
+  const [failed, setFailed] = useState([]);
+  if (!ids.length) return null;
+
+  const closeAll = async () => {
+    if (!window.confirm(`Close ${ids.length} ticket${ids.length > 1 ? "s" : ""}?`)) return;
+    setBusy(true);
+    setDone(0);
+    const bad = [];
+    for (const id of ids) {
+      try { await api.setStatus(id, "Closed"); } catch { bad.push(id); }
+      setDone((n) => n + 1);
+    }
+    setFailed(bad);
+    setBusy(false);
+    if (!bad.length) onDone();
+  };
+
+  return (
+    <div className="bulk-bar">
+      <strong>{ids.length} selected</strong>
+      <button className="btn sm" onClick={() => onPickAll(allIds)} disabled={busy || ids.length === allIds.length}>
+        Select all {allIds.length}
+      </button>
+      <button className="btn sm" onClick={onClear} disabled={busy}>Clear</button>
+      <button className="btn sm primary" onClick={closeAll} disabled={busy} style={{ marginLeft: "auto" }}>
+        {busy ? `Closing ${done}/${ids.length}…` : `Close ${ids.length}`}
+      </button>
+      {failed.length > 0 && (
+        <span style={{ color: "var(--red)", fontSize: 12 }}>{failed.length} could not be closed</span>
+      )}
+    </div>
+  );
+}
+
 function AnyTicketRow(props) {
   return String(props.ticket.id).startsWith("bb:")
     ? <BestBuyTicketRow ticket={props.ticket} open={props.open} onToggle={props.onToggle} />
     : <TicketRow {...props} />;
 }
 
-function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "", peek = false }) {
+function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "", peek = false, selected = false, onSelect = null }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
@@ -1309,6 +1368,16 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   return (
     <div className={`ticket ${sent ? "sent" : ""}`}>
       <div className="ticket-head" onClick={onToggle}>
+        {onSelect && (
+          <input
+            type="checkbox"
+            className="pick"
+            checked={selected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onSelect(ticket.id, e.target.checked)}
+            title="Select for bulk actions"
+          />
+        )}
         <div>
           <div className="ticket-subj" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {editingSubj ? (

@@ -94,6 +94,16 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .btn.sm { padding: 5px 10px; font-size: 12px; }
 
 /* ── tickets ───────────────────────────────────────────── */
+/* bulk-action bar — only rendered when rows are checked */
+.bulk-bar {
+  position: sticky; top: 76px; z-index: 5;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: var(--brass-soft); border: 1px solid #e3d3b4; border-radius: var(--radius);
+  font-size: 13px;
+}
+.ticket-head .pick { margin: 3px 2px 0 0; width: 15px; height: 15px; accent-color: var(--brass); cursor: pointer; flex-shrink: 0; }
+
 .ticket { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .ticket.sent { border-color: var(--green); }
 .ticket-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 18px; gap: 16px; cursor: pointer; }

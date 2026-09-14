@@ -81,6 +81,12 @@ ADDRESS EVERYTHING:
 - Respond to every concrete point in the customer's latest message: each question, each symptom or detail they describe, and any specific offer or request they make. Never silently drop a detail they took the time to raise.
 - If the customer signals a broader concern (for example, they resell or recommend the product to their own clients), acknowledge it directly and take it seriously.
 
+INTERNAL NOTES (when present):
+- An "INTERNAL NOTES" section carries the team's own notes on this ticket. They are the record of what was already decided or found out — "manager approved a full refund", "customer is being credited", "do not replace, out of warranty".
+- A decision recorded there OVERRIDES the general caution rules above: if a note says a refund, replacement or exception was approved, write the reply on that basis instead of saying the decision is pending.
+- The notes are private. Never quote them, mention them, or reveal that internal discussion happened — just write the reply that reflects the outcome.
+- Where a note and the order data disagree, the note is more current.
+
 AGENT INSTRUCTIONS (when present):
 - If the request includes an "AGENT INSTRUCTIONS" section, the human agent is telling you WHAT the reply should say — rough notes, bullet points or a quick draft. Turn them into the full, polished reply: expand them naturally, keep the ticket's context and tone rules, and use the Knowledge Base for supporting details.
 - Every specific the agent gives there (resolutions, replacements, refunds, timelines, amounts) is AUTHORIZED by the human and must be kept exactly — those instructions override the caution rules below. Do not add commitments the agent didn't give.
@@ -88,6 +94,12 @@ AGENT INSTRUCTIONS (when present):
 WARRANTY / DEFECT / COMPLAINT:
 - Validate the customer's experience, but do NOT admit fault, assign a cause, or concede the product is defective — especially while any inspection, factory report or internal review is pending. Treat the customer's care practices as helpful context for the review, not as proof of cause.
 - Do not promise a replacement, refund, credit or any other resolution. Those decisions are made by a human.
+
+LENGTH — answer what was asked and stop:
+- Agents shorten roughly a quarter of the drafts they send, most often on returns and order status, so err on the side of brief.
+- State the policy detail that applies to THIS customer's situation. Do not recite the rest of the policy, restate their question back to them, or explain what you are about to explain.
+- No filler openers ("I hope this email finds you well", "Thank you for reaching out to us regarding your recent inquiry") beyond a short, warm first line.
+- If the whole answer is two sentences, send two sentences.
 
 FORMATTING — the reply is an HTML email body, so make it easy to read, never one giant wall of text:
 - Break the reply into short paragraphs, one idea each, using <p>…</p>. Always separate the greeting, the body points, and the sign-off into their own paragraphs.
@@ -266,7 +278,7 @@ export async function improveDraft({ draft }) {
   return { reply: reply.trim() || src };
 }
 
-export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [], walmartOrders = [], instructions = "" }) {
+export async function generateDraft({ ticket, conversation, kb, images = [], orders = [], shipments = [], wayfairPos = [], walmartOrders = [], notes = [], instructions = "" }) {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set in .env");
   }
@@ -283,6 +295,21 @@ export async function generateDraft({ ticket, conversation, kb, images = [], ord
   const walmartBlock = walmartOrders.length
     ? `\n=== WALMART ORDERS ===\n${walmartToText(walmartOrders)}\n`
     : "";
+  // The team's private notes on the ticket. These are where a decision that has
+  // already been made gets written down ("manager approved a full refund"), and
+  // the draft contradicted them before it could see them.
+  const notesBlock = notes.length
+    ? `\n=== INTERNAL NOTES (the team's own, never shown to the customer) ===\n${notes
+        .slice(-6)
+        .map((n) => {
+          const when = String(n.createdTime || n.commentedTime || "").slice(0, 10);
+          const who = n.author?.name || n.commenterName || "Agent";
+          const text = String(n.content || n.text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          return text ? `[${when} ${who}] ${text.slice(0, 700)}` : "";
+        })
+        .filter(Boolean)
+        .join("\n")}\n`
+    : "";
   const instructionsBlock = instructions
     ? `\n=== AGENT INSTRUCTIONS (write the reply saying this) ===\n${instructions.slice(0, 4000)}\n`
     : "";
@@ -293,7 +320,7 @@ Channel: ${ticket.channel || "Email"}
 
 === CONVERSATION (oldest first) ===
 ${conversationToText(conversation)}
-${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}${walmartBlock}${instructionsBlock}
+${images.length ? `\n[The customer attached ${images.length} photo(s) — included after this text: ${images.map((i) => i.name).join(", ")}]\n` : ""}${ordersBlock}${shipBlock}${wayfairBlock}${walmartBlock}${notesBlock}${instructionsBlock}
 === APPROVED KNOWLEDGE BASE ===
 ${kbToText(kb)}
 
