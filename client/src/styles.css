@@ -45,6 +45,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   position: sticky; top: 0; background: var(--paper); z-index: 10;
 }
 .brand { display: flex; align-items: baseline; gap: 12px; }
+/* the drop sits on the wordmark's baseline rather than the text box's */
+.brand-mark { align-self: center; display: block; flex-shrink: 0; margin-right: -2px; }
 .brand h1 { font-size: 22px; }
 .brand .sub { color: var(--ink-faint); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
 

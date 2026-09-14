@@ -8,3 +8,5 @@ client/dist
 server/kb-data.json
 server/kb-embeddings.json
 server/data
+# brand source files — the app serves its copies from client/public
+assets

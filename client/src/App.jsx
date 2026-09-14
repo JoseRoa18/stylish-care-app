@@ -87,6 +87,8 @@ export default function App() {
       <div className="topbar">
         <div>
           <div className="brand">
+            {/* the mark only — the lockup's tagline is Spanish and the UI is English */}
+            <img src="/icon.svg" alt="" className="brand-mark" width="30" height="30" />
             <h1>WeCare</h1>
             <span className="sub">Stylish Customer Care</span>
           </div>
