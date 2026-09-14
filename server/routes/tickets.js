@@ -152,6 +152,7 @@ router.put("/settings", async (req, res) => {
     // saveSettings validates the numbers; without this the targets the
     // Settings dialog sends were silently dropped
     if (req.body.targets && typeof req.body.targets === "object") patch.targets = req.body.targets;
+    if (typeof req.body.surveysEnabled === "boolean") patch.surveysEnabled = req.body.surveysEnabled;
     res.json(await saveSettings(patch));
   } catch (err) {
     res.status(502).json({ error: err.message });

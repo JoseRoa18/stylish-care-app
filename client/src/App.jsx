@@ -20,12 +20,13 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [signature, setSignature] = useState("");
   const [targets, setTargets] = useState(null);
+  const [surveysEnabled, setSurveysEnabled] = useState(false);
   const [inboxSearch, setInboxSearch] = useState("");
 
   useEffect(() => {
     if (!auth.authed) return;
     api.getSettings()
-      .then((s) => { setSignature(s.signature || ""); setTargets(s.targets || null); })
+      .then((s) => { setSignature(s.signature || ""); setTargets(s.targets || null); setSurveysEnabled(!!s.surveysEnabled); })
       .catch(() => {});
   }, [auth.authed]);
 
@@ -34,6 +35,7 @@ export default function App() {
       const s = await api.saveSettings(patch);
       setSignature(s.signature || "");
       setTargets(s.targets || null);
+      setSurveysEnabled(!!s.surveysEnabled);
       setSettingsOpen(false);
     } catch (e) {
       alert(`Could not save: ${e.message}`);
@@ -152,6 +154,7 @@ export default function App() {
         <SettingsModal
           initial={signature}
           initialTargets={targets}
+          initialSurveys={surveysEnabled}
           onClose={() => setSettingsOpen(false)}
           onSave={saveSettings}
         />
@@ -163,10 +166,11 @@ export default function App() {
 // App settings: the outgoing reply signature, and the service targets the
 // dashboard measures against (kept here so the team can move a goal without
 // waiting on a deploy).
-function SettingsModal({ initial, initialTargets, onClose, onSave }) {
+function SettingsModal({ initial, initialTargets, initialSurveys, onClose, onSave }) {
   const [val, setVal] = useState(initial || "");
   const [res, setRes] = useState(initialTargets?.resolutionHours ?? 48);
   const [wait, setWait] = useState(initialTargets?.waitHours ?? 24);
+  const [surveys, setSurveys] = useState(!!initialSurveys);
   const numField = {
     width: 80, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8,
     background: "#fffef9", fontSize: 13,
@@ -191,6 +195,21 @@ function SettingsModal({ initial, initialTargets, onClose, onSave }) {
           </label>
         </div>
 
+        <h3 style={{ margin: "0 0 4px" }}>Satisfaction survey</h3>
+        <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 0 10px" }}>
+          When on, closing a ticket emails the customer three quick questions. Automated notifications,
+          no-reply addresses and our own mailboxes are always skipped.
+        </p>
+        <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, marginBottom: 22, cursor: "pointer" }}>
+          <input type="checkbox" checked={surveys} onChange={(e) => setSurveys(e.target.checked)} style={{ width: 16, height: 16 }} />
+          <span>
+            Send the survey when a ticket is closed
+            <span style={{ marginLeft: 8, fontSize: 12, color: surveys ? "var(--green)" : "var(--ink-faint)" }}>
+              {surveys ? "— on" : "— off, nothing is sent"}
+            </span>
+          </span>
+        </label>
+
         <h3 style={{ margin: "0 0 4px" }}>Reply signature</h3>
         <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 0 12px" }}>
           HTML appended to the end of every reply (AI drafts include it automatically). Use the team's
@@ -212,6 +231,7 @@ function SettingsModal({ initial, initialTargets, onClose, onSave }) {
               onSave({
                 signature: val,
                 targets: { resolutionHours: Number(res), waitHours: Number(wait) },
+                surveysEnabled: surveys,
               })
             }
           >

@@ -28,17 +28,22 @@ const cleanTargets = (t) => {
 export async function getSettings() {
   let signature = DEFAULT_SIGNATURE;
   let targets = { ...DEFAULT_TARGETS };
+  // Off until the team turns it on: closing a ticket would otherwise start
+  // emailing customers the moment the code ships, which is not a decision the
+  // deploy should make on its own.
+  let surveysEnabled = false;
   try {
     if (supabase) {
       const { data } = await supabase
         .from("app_state").select("value").eq("key", "settings").maybeSingle();
       if (data?.value?.signature != null) signature = data.value.signature;
       if (data?.value?.targets) targets = cleanTargets(data.value.targets);
+      if (data?.value?.surveysEnabled != null) surveysEnabled = Boolean(data.value.surveysEnabled);
     }
   } catch {
     /* fall back to defaults */
   }
-  return { signature, targets };
+  return { signature, targets, surveysEnabled };
 }
 
 export async function saveSettings(patch) {

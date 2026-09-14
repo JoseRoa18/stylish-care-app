@@ -181,7 +181,7 @@ export default function Dashboard({ onOpenInbox }) {
       )}
 
       {/* ── satisfaction (post-close survey) ─────────────── */}
-      <SatisfactionPanel m={csat} />
+      <SatisfactionPanel m={csat} enabled={data.surveysEnabled} />
 
       {/* ── which models drive the support load ──────────── */}
       <ModelReports reports={models} />
@@ -326,7 +326,7 @@ function targetColor(ms, targetHours) {
 // What customers said after their ticket was closed. "Satisfaction rate" is the
 // share rating 4 or 5 — the standard CSAT definition, so it can be compared to
 // a benchmark rather than only to itself.
-function SatisfactionPanel({ m }) {
+function SatisfactionPanel({ m, enabled }) {
   if (!m) {
     return (
       <div className="card" style={{ marginTop: 16 }}>
@@ -341,9 +341,13 @@ function SatisfactionPanel({ m }) {
   if (!m.answered) {
     return (
       <div className="card" style={{ marginTop: 16 }}>
-        <div className="chart-title">Satisfaction · last 90 days</div>
+        <div className="chart-title">Satisfaction</div>
         <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>
-          {m.sent ? `${m.sent} survey${m.sent > 1 ? "s" : ""} sent, no answers yet.` : "No surveys sent yet — they go out when a ticket is closed."}
+          {m.sent
+            ? `${m.sent} survey${m.sent > 1 ? "s" : ""} sent, no answers yet.`
+            : enabled === false
+            ? "Surveys are turned off. Switch them on in Settings and every closed ticket will ask the customer three quick questions."
+            : "No surveys sent yet — they go out when a ticket is closed."}
         </div>
       </div>
     );

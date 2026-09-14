@@ -13,6 +13,7 @@
 import crypto from "node:crypto";
 import { supabase } from "./supabase.js";
 import { sendReply } from "./zoho.js";
+import { getSettings } from "./settings.js";
 
 export const QUESTIONS = {
   resolved: { label: "Did we resolve your issue?", options: ["yes", "partly", "no"] },
@@ -54,6 +55,10 @@ function mailHtml({ name, token }) {
 // Create (or find) the survey for a ticket and email it. Returns why it was
 // skipped rather than throwing, so closing a ticket never fails over a survey.
 export async function sendSurvey(ticket) {
+  // the master switch lives in Settings — checked here rather than at the call
+  // site so no future caller can bypass it
+  const { surveysEnabled } = await getSettings().catch(() => ({ surveysEnabled: false }));
+  if (!surveysEnabled) return { sent: false, skipped: "surveys are turned off" };
   const check = eligible(ticket);
   if (!check.ok) return { sent: false, skipped: check.why };
   if (!supabase) return { sent: false, skipped: "no database" };

@@ -401,6 +401,7 @@ export function createApp() {
         resolutionByWeek: weeklyResolution(resRows || [], weeksBack),
         categoryLabels: CATEGORIES,
         targets: settings?.targets || null,
+        surveysEnabled: !!settings?.surveysEnabled,
         lastFetch: new Date().toISOString(),
         error: null,
       });
