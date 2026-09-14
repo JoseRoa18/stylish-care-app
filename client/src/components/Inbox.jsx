@@ -253,7 +253,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
         <>
           <BulkBar
             ids={[...picked]}
-            allIds={shown.map((t) => t.id)}
+            tickets={shown}
             onClear={() => setPicked(new Set())}
             onPickAll={(ids) => setPicked(new Set(ids))}
             onDone={() => { setPicked(new Set()); load(); }}
@@ -752,24 +752,55 @@ function BestBuyTicketRow({ ticket, open, onToggle }) {
 // the slow part of triage, so this closes them in one pass — sequentially, to
 // stay inside Zoho's rate limit, and it reports what failed instead of
 // pretending everything worked.
-function BulkBar({ ids, allIds, onClear, onPickAll, onDone }) {
+function BulkBar({ ids, tickets, onClear, onPickAll, onDone }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(0);
-  const [failed, setFailed] = useState([]);
+  const [note, setNote] = useState(null);
   if (!ids.length) return null;
+
+  const allIds = tickets.map((t) => t.id);
+  const chosen = tickets.filter((t) => ids.includes(t.id));
+  // Best Buy rows mirror marketplace threads, not Zoho tickets — they can't be
+  // merged, so they're excluded rather than failing halfway through.
+  const mergeable = chosen.filter((t) => !String(t.id).startsWith("bb:"));
+  // the oldest ticket survives: it holds the original conversation
+  const primary = [...mergeable].sort((a, b) => Number(a.number) - Number(b.number))[0];
 
   const closeAll = async () => {
     if (!window.confirm(`Close ${ids.length} ticket${ids.length > 1 ? "s" : ""}?`)) return;
     setBusy(true);
     setDone(0);
+    setNote(null);
     const bad = [];
     for (const id of ids) {
       try { await api.setStatus(id, "Closed"); } catch { bad.push(id); }
       setDone((n) => n + 1);
     }
-    setFailed(bad);
     setBusy(false);
-    if (!bad.length) onDone();
+    if (bad.length) setNote(`${bad.length} could not be closed`);
+    else onDone();
+  };
+
+  const mergeAll = async () => {
+    const others = mergeable.filter((t) => t.id !== primary.id).map((t) => t.id);
+    const skipped = chosen.length - mergeable.length;
+    if (
+      !window.confirm(
+        `Merge ${others.length} ticket${others.length > 1 ? "s" : ""} INTO #${primary.number}?\n\n` +
+          `Their messages move into #${primary.number} (the oldest of the selection) and the others go away. This cannot be undone.` +
+          (skipped ? `\n\n${skipped} Best Buy thread(s) will be skipped — those can't be merged.` : "")
+      )
+    ) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.merge(primary.id, others);
+      onDone();
+    } catch (e) {
+      setNote(`Merge failed: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -779,12 +810,19 @@ function BulkBar({ ids, allIds, onClear, onPickAll, onDone }) {
         Select all {allIds.length}
       </button>
       <button className="btn sm" onClick={onClear} disabled={busy}>Clear</button>
-      <button className="btn sm primary" onClick={closeAll} disabled={busy} style={{ marginLeft: "auto" }}>
-        {busy ? `Closing ${done}/${ids.length}…` : `Close ${ids.length}`}
+      {note && <span style={{ color: "var(--red)", fontSize: 12 }}>{note}</span>}
+      <button
+        className="btn sm"
+        onClick={mergeAll}
+        disabled={busy || mergeable.length < 2}
+        title={mergeable.length < 2 ? "Select at least two Zoho tickets" : `Merge into #${primary.number}`}
+        style={{ marginLeft: "auto" }}
+      >
+        {mergeable.length >= 2 ? `Merge into #${primary.number}` : "Merge"}
       </button>
-      {failed.length > 0 && (
-        <span style={{ color: "var(--red)", fontSize: 12 }}>{failed.length} could not be closed</span>
-      )}
+      <button className="btn sm primary" onClick={closeAll} disabled={busy}>
+        {busy ? `Working ${done}/${ids.length}…` : `Close ${ids.length}`}
+      </button>
     </div>
   );
 }
