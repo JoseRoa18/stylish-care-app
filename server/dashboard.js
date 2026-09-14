@@ -19,9 +19,38 @@ export const PERIODS = {
 
 const DAY = 86400000;
 
+// The whole table, briefly cached. Switching periods re-aggregates the same
+// rows, so re-reading a few thousand of them each time is pure latency — this
+// makes the period buttons feel instant while staying fresh enough for a
+// dashboard that also polls every 30s.
+let cache = null; // { at, rows }
+const CACHE_MS = 20_000;
+
+// Same idea for anything that doesn't change with the period: the KB count, the
+// settings, the call log and the 8-week resolution query were all being redone
+// on every click of a period button.
+const memos = new Map();
+export function memo(key, ms, fn) {
+  const hit = memos.get(key);
+  if (hit && Date.now() - hit.at < ms) return hit.value;
+  const value = Promise.resolve(fn()).catch((e) => {
+    memos.delete(key); // don't cache a failure
+    throw e;
+  });
+  memos.set(key, { at: Date.now(), value });
+  return value;
+}
+
+async function allRows() {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows;
+  const rows = await fetchRows();
+  cache = { at: Date.now(), rows };
+  return rows;
+}
+
 // Rows for the window, plus the ones still open (an old open ticket belongs in
 // "avg wait" no matter which period is selected).
-async function load({ days, includeNotifications }) {
+async function fetchRows() {
   // `model` only exists once supabase/surveys.sql has been run — ask for it,
   // and drop back to the rest of the columns until then
   const WITH = "id,number,subject,status,channel,category,model,created_time,closed_time,customer_response_time";
@@ -41,6 +70,11 @@ async function load({ days, includeNotifications }) {
     rows.push(...data);
     if (data.length < 1000) break;
   }
+  return rows;
+}
+
+async function load({ days, includeNotifications }) {
+  const rows = await allRows();
   const since = days > 0 ? Date.now() - days * DAY : null;
   const keep = (r) =>
     (includeNotifications || r.category !== "notification") &&

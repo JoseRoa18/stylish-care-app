@@ -7,7 +7,7 @@
 import { supabase, toVector } from "./supabase.js";
 import { embedDocuments } from "./embeddings.js";
 
-export const SOURCES = ["manual", "web", "dropbox", "zoho-template", "youtube", "resolved-ticket"];
+export const SOURCES = ["manual", "web", "dropbox", "zoho-template", "youtube", "resolved-ticket", "product"];
 
 function rowToArticle(r) {
   return {
@@ -57,20 +57,19 @@ export async function listArticles() {
 }
 
 // Counts per source + total (cheap head counts, no data transfer).
+// One count per source. These used to run one after another — eight sequential
+// round-trips, 2.4s, on every dashboard load. They don't depend on each other.
 export async function sourceCounts() {
-  const bySource = {};
-  for (const s of SOURCES) {
-    const { count, error } = await supabase
-      .from("kb_articles")
-      .select("*", { count: "exact", head: true })
-      .eq("source", s);
+  const countOf = (q) => q.then(({ count, error }) => {
     if (error) throw new Error(error.message);
-    bySource[s] = count || 0;
-  }
-  const { count: total } = await supabase
-    .from("kb_articles")
-    .select("*", { count: "exact", head: true });
-  return { total: total || 0, bySource };
+    return count || 0;
+  });
+  const head = () => supabase.from("kb_articles").select("*", { count: "exact", head: true });
+  const [total, ...counts] = await Promise.all([
+    countOf(head()),
+    ...SOURCES.map((s) => countOf(head().eq("source", s))),
+  ]);
+  return { total, bySource: Object.fromEntries(SOURCES.map((s, i) => [s, counts[i]])) };
 }
 
 // ── manual CRUD (the KB editor) ──────────────────────────────

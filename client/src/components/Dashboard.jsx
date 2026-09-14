@@ -35,21 +35,27 @@ export default function Dashboard({ onOpenInbox }) {
   const [models, setModels] = useState(null);
   const [csat, setCsat] = useState(null);
   const [period, setPeriod] = useState("90d");
-  const [includeNotifications, setIncludeNotifications] = useState(false);
   const [err, setErr] = useState(null);
 
+  // Only what actually depends on the period reloads when it changes. The
+  // Wayfair panel alone took 2s (it calls their API), and refetching it on
+  // every click is what made switching feel slow.
   useEffect(() => {
     const load = () => {
-      api.dashboard({ period, includeNotifications }).then(setData).catch((e) => setErr(e.message));
-      api.feedbackMetrics(90).then(setFb).catch(() => {});
-      api.wayfairCancellations(14).then(setWf).catch(() => {});
+      api.dashboard({ period }).then(setData).catch((e) => setErr(e.message));
       api.modelReports(PERIOD_DAYS[period] || 0).then(setModels).catch(() => setModels(null));
-      api.surveyMetrics(90).then((r) => setCsat(r.metrics)).catch(() => setCsat(null));
     };
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
-  }, [period, includeNotifications]);
+  }, [period]);
+
+  // these three answer their own fixed windows, so they load once
+  useEffect(() => {
+    api.feedbackMetrics(90).then(setFb).catch(() => {});
+    api.wayfairCancellations(14).then(setWf).catch(() => {});
+    api.surveyMetrics(90).then((r) => setCsat(r.metrics)).catch(() => setCsat(null));
+  }, []);
 
   if (err) return <div className="banner error">Could not load dashboard: {err}</div>;
   if (!data) return <div className="empty"><span className="spin" /> Loading…</div>;
@@ -82,13 +88,13 @@ export default function Dashboard({ onOpenInbox }) {
             {label}
           </button>
         ))}
-        <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--ink-soft)", cursor: "pointer" }}>
-          <input type="checkbox" checked={includeNotifications} onChange={(e) => setIncludeNotifications(e.target.checked)} />
-          Include automated notifications
-          {data.notifications > 0 && (
-            <span style={{ color: "var(--ink-faint)" }}>({data.notifications} hidden)</span>
-          )}
-        </label>
+        {/* automated mail is never what the team wants to see — the count is
+            kept visible so the numbers are not silently smaller than reality */}
+        {data.notifications > 0 && (
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-faint)" }}>
+            {data.notifications} automated notification{data.notifications > 1 ? "s" : ""} excluded
+          </span>
+        )}
       </div>
 
       {/* ── headline metrics ─────────────────────────────── */}

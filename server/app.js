@@ -30,7 +30,7 @@ import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThr
 import { walmartConfigured, lookupWalmartOrders } from "./walmart.js";
 import { categorizePending, CATEGORIES } from "./categorize.js";
 import { getSettings } from "./settings.js";
-import { dashboardData } from "./dashboard.js";
+import { dashboardData, memo } from "./dashboard.js";
 import { detectPending, modelReport } from "./models.js";
 import { sendSurvey, getSurvey, answerSurvey, surveyMetrics, QUESTIONS } from "./surveys.js";
 import {
@@ -360,13 +360,18 @@ export function createApp() {
   // answers one window instead of each card having its own (or none).
   app.get("/api/dashboard", async (req, res) => {
     try {
-      await maybeSync(); // keep the tickets table fresh (throttled to ~2 min)
+      // Refresh the tickets table in the BACKGROUND. Awaiting it cost 4s on
+      // every call, which is what made switching periods feel broken — and the
+      // dashboard reads the table, not Zoho, so at worst it is one sync behind.
+      maybeSync().catch(() => {});
       const period = String(req.query.period || "90d");
       const includeNotifications = req.query.notifications === "include";
+      // none of these three change with the period, so they are memoised —
+      // re-running them on every period click was most of the wait
       const [data, kb, settings] = await Promise.all([
         dashboardData({ period, includeNotifications }),
-        sourceCounts().catch(() => ({ total: 0 })),
-        getSettings().catch(() => ({ targets: null })),
+        memo("kb-counts", 60_000, () => sourceCounts()).catch(() => ({ total: 0 })),
+        memo("settings", 30_000, () => getSettings()).catch(() => ({ targets: null })),
       ]);
       // label whatever arrived since the last visit, in the background
       categorizePending({ limit: 60 }).catch(() => {});
@@ -374,7 +379,9 @@ export function createApp() {
 
       // RingCentral calls, aligned to the last 7 buckets of the ticket series
       const tail = data.perDay.slice(-7);
-      const callsByDay = ringcentralConfigured() ? await getCallsPerDay({ days: 7 }).catch(() => null) : null;
+      const callsByDay = ringcentralConfigured()
+        ? await memo("calls-7d", 60_000, () => getCallsPerDay({ days: 7 })).catch(() => null)
+        : null;
       const callsPerDay = callsByDay ? tail.map((p) => ({ label: p.label, count: callsByDay[p.date] || 0 })) : null;
       const combinedPerDay = callsByDay
         ? tail.map((p) => ({ label: p.label, count: p.count + (callsByDay[p.date] || 0) }))
