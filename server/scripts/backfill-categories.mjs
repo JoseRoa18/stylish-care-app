@@ -26,21 +26,30 @@ const DEEP_CONCURRENCY = 4;
 const since = new Date();
 since.setMonth(since.getMonth() - MONTHS);
 
-let q = supabase
-  .from("tickets")
-  .select("id,subject")
-  .gte("created_time", since.toISOString())
-  .order("created_time", { ascending: false });
-if (!REDO) q = q.is("category", null);
-
-const { data: rows, error } = await q;
-if (error) {
-  console.error(
-    /category/.test(error.message)
-      ? "La columna 'category' no existe todavia — corre supabase/categories.sql primero."
-      : error.message
-  );
-  process.exit(1);
+// Supabase caps a select at 1000 rows. Without paging a big backfill silently
+// does the first thousand and reports success, leaving the rest unlabelled.
+const PAGE = 1000;
+const rows = [];
+for (let page = 0; ; page++) {
+  let q = supabase
+    .from("tickets")
+    .select("id,subject")
+    .gte("created_time", since.toISOString())
+    .order("id")
+    .range(page * PAGE, page * PAGE + PAGE - 1);
+  if (!REDO) q = q.is("category", null);
+  const { data, error } = await q;
+  if (error) {
+    console.error(
+      /category/.test(error.message)
+        ? "La columna 'category' no existe todavia — corre supabase/categories.sql primero."
+        : error.message
+    );
+    process.exit(1);
+  }
+  if (!data?.length) break;
+  rows.push(...data);
+  if (data.length < PAGE) break;
 }
 console.log(`tickets a categorizar (ultimos ${MONTHS} meses): ${rows.length}`);
 if (!rows.length) process.exit(0);
