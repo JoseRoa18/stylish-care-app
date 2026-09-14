@@ -44,7 +44,7 @@ export default function Dashboard({ onOpenInbox }) {
 
   const lastFetch = data.lastFetch ? new Date(data.lastFetch).toLocaleString() : "—";
   const connectors = [
-    ["Gemini", data.gemini], ["Zoho", data.zoho], ["Dropbox", data.dropbox],
+    ["Gemini", data.gemini], ["Zoho", data.zoho],
   ];
 
   return (
@@ -64,8 +64,17 @@ export default function Dashboard({ onOpenInbox }) {
           value={data.openNow ?? data.active}
           sub={`incl. escalated · ${data.active} active total · ${data.closed} closed`}
         />
-        <Metric label="Avg wait (open)" value={fmtDuration(data.avgWaitMs)} color={waitColor(data.avgWaitMs)} sub={`open + escalated · oldest ${fmtDuration(data.oldestWaitMs)}`} />
-        <AvgResolutionCard defaultAvgMs={data.avgResolutionMs} defaultCount={data.resolvedSample || 0} />
+        <Metric
+          label="Avg wait (open)"
+          value={fmtDuration(data.avgWaitMs)}
+          color={targetColor(data.avgWaitMs, data.targets?.waitHours) || waitColor(data.avgWaitMs)}
+          sub={`open + escalated · oldest ${fmtDuration(data.oldestWaitMs)}${data.targets?.waitHours ? ` · target ${data.targets.waitHours}h` : ""}`}
+        />
+        <AvgResolutionCard
+          defaultAvgMs={data.avgResolutionMs}
+          defaultCount={data.resolvedSample || 0}
+          targetHours={data.targets?.resolutionHours}
+        />
         <Metric label="KB articles" value={data.kbArticles} />
       </div>
 
@@ -81,11 +90,15 @@ export default function Dashboard({ onOpenInbox }) {
         </div>
       </div>
 
+      {/* ── what the tickets are about ───────────────────── */}
+      <CategoryPanel
+        byCategory={data.byCategory}
+        awaiting={data.awaitingByCategory}
+        labels={data.categoryLabels}
+      />
+
       {/* ── volume over time ─────────────────────────────── */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="chart-title">New tickets · last 7 days</div>
-        <ColumnChart data={data.perDay || []} />
-      </div>
+      <TrendCard initial={data.perDay || []} />
 
       {/* ── RingCentral: calls + combined volume ─────────── */}
       {data.callsPerDay?.length > 0 && (
@@ -105,7 +118,7 @@ export default function Dashboard({ onOpenInbox }) {
       {data.resolutionByWeek?.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="chart-title">Avg resolution · by week (last 8 weeks)</div>
-          <WeeklyResolution data={data.resolutionByWeek} />
+          <WeeklyResolution data={data.resolutionByWeek} targetHours={data.targets?.resolutionHours} />
         </div>
       )}
 
@@ -217,7 +230,7 @@ function AiQuality({ fb }) {
 }
 
 // Avg resolution with a selectable window (all time, 30/90 days, or a year).
-function AvgResolutionCard({ defaultAvgMs, defaultCount }) {
+function AvgResolutionCard({ defaultAvgMs, defaultCount, targetHours }) {
   const [period, setPeriod] = useState("all");
   const [val, setVal] = useState({ avgMs: defaultAvgMs, count: defaultCount });
   const [loading, setLoading] = useState(false);
@@ -252,14 +265,22 @@ function AvgResolutionCard({ defaultAvgMs, defaultCount }) {
           {years.map((y) => <option key={y} value={`year:${y}`}>{y}</option>)}
         </select>
       </div>
-      <div className="value" style={{ opacity: loading ? 0.4 : 1 }}>
+      <div className="value" style={{ opacity: loading ? 0.4 : 1, color: targetColor(val.avgMs, targetHours) }}>
         {val.avgMs != null ? fmtDuration(val.avgMs) : "—"}
       </div>
       <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 4 }}>
         {loading ? "calculating…" : `over ${val.count || 0} closed tickets`}
+        {targetHours ? ` · target ${targetHours}h` : ""}
       </div>
     </div>
   );
+}
+
+// Green under the goal, red over it. No target set → leave the value neutral
+// rather than implying a judgement we were never given.
+function targetColor(ms, targetHours) {
+  if (ms == null || !targetHours) return undefined;
+  return ms <= targetHours * 3600000 ? "var(--green)" : "var(--red)";
 }
 
 function Metric({ label, value, sub, color }) {
@@ -296,18 +317,34 @@ function BarChart({ data, colors, onPick }) {
 }
 
 // Weekly average resolution time — bars scaled to days, labelled with the value.
-function WeeklyResolution({ data }) {
+// A dashed goal line sits at the target so a week that missed it reads at a
+// glance; bars over the target turn red.
+function WeeklyResolution({ data, targetHours }) {
   const days = (ms) => (ms == null ? null : ms / 86400000);
-  const max = Math.max(1, ...data.map((d) => days(d.avgMs) || 0));
+  const target = targetHours ? targetHours / 24 : null;
+  const PLOT = 84; // px of plot area the tallest bar fills
+  // keep the goal line on-chart even when every week beat it comfortably
+  const max = Math.max(1, ...data.map((d) => days(d.avgMs) || 0), target || 0);
   return (
     <>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 110, marginTop: 8 }}>
+      <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "flex-end", height: 110, marginTop: 8 }}>
+        {target != null && (
+          <div
+            title={`Target ${targetHours}h`}
+            style={{ position: "absolute", left: 0, right: 0, bottom: (target / max) * PLOT, borderTop: "1px dashed var(--green)", pointerEvents: "none" }}
+          >
+            <span style={{ position: "absolute", right: 0, top: -13, fontSize: 10, color: "var(--green)", background: "var(--card)", padding: "0 3px" }}>
+              target {targetHours}h
+            </span>
+          </div>
+        )}
         {data.map((d, i) => {
           const dv = days(d.avgMs);
+          const over = target != null && dv != null && dv > target;
           return (
             <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center" }} title={d.count ? `${d.count} tickets closed` : "no tickets closed"}>
               {dv != null && <span style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 3 }}>{dv < 1 ? `${Math.round(dv * 24)}h` : `${dv.toFixed(1)}d`}</span>}
-              <div style={{ width: "60%", maxWidth: 44, background: dv == null ? "var(--line-soft)" : "var(--brass)", borderRadius: "4px 4px 0 0", height: `${dv == null ? 2 : Math.max((dv / max) * 84, 3)}px` }} />
+              <div style={{ width: "60%", maxWidth: 44, background: dv == null ? "var(--line-soft)" : over ? "var(--red)" : "var(--green)", borderRadius: "4px 4px 0 0", height: `${dv == null ? 2 : Math.max((dv / max) * PLOT, 3)}px` }} />
             </div>
           );
         })}
@@ -320,6 +357,148 @@ function WeeklyResolution({ data }) {
         ))}
       </div>
     </>
+  );
+}
+
+// New-ticket volume at the granularity the user picks. Seven fixed days was
+// fine for spotting a spike but useless for "are we trending up this quarter".
+const TREND_PERIODS = [
+  { id: "days", label: "Days", n: 14 },
+  { id: "weeks", label: "Weeks", n: 12 },
+  { id: "months", label: "Months", n: 12 },
+  { id: "custom", label: "Custom" },
+];
+
+function TrendCard({ initial }) {
+  const [period, setPeriod] = useState("days");
+  const [points, setPoints] = useState(initial || []);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [range, setRange] = useState({ from: monthAgo, to: today });
+
+  const load = async (p, r = range) => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const spec = TREND_PERIODS.find((x) => x.id === p);
+      const res = await api.trend(
+        p === "custom" ? { period: p, from: r.from, to: r.to } : { period: p, n: spec?.n }
+      );
+      setPoints(res.points || []);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pick = (p) => {
+    setPeriod(p);
+    load(p);
+  };
+
+  const total = points.reduce((n, p) => n + p.count, 0);
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="chart-title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>New tickets</span>
+        <span style={{ fontSize: 11, color: "var(--ink-faint)", fontWeight: 400 }}>
+          {total} total{loading ? " · loading…" : ""}
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          {TREND_PERIODS.map((p) => (
+            <button
+              key={p.id}
+              className={`btn sm ${period === p.id ? "primary" : ""}`}
+              onClick={() => pick(p.id)}
+              style={{ fontSize: 11, padding: "3px 9px" }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {period === "custom" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, fontSize: 12, color: "var(--ink-faint)" }}>
+          <input
+            type="date" value={range.from} max={range.to}
+            onChange={(e) => { const r = { ...range, from: e.target.value }; setRange(r); load("custom", r); }}
+            style={dateStyle}
+          />
+          <span>to</span>
+          <input
+            type="date" value={range.to} min={range.from} max={today}
+            onChange={(e) => { const r = { ...range, to: e.target.value }; setRange(r); load("custom", r); }}
+            style={dateStyle}
+          />
+        </div>
+      )}
+      {err ? (
+        <div style={{ fontSize: 12, color: "var(--red)", marginTop: 8 }}>{err}</div>
+      ) : points.length ? (
+        <div style={{ opacity: loading ? 0.45 : 1 }}><ColumnChart data={points} /></div>
+      ) : (
+        <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 8 }}>No tickets in this range.</div>
+      )}
+    </div>
+  );
+}
+
+const dateStyle = {
+  padding: "4px 8px", border: "1px solid var(--line)", borderRadius: 6,
+  background: "var(--card)", color: "var(--ink-soft)", fontSize: 12,
+};
+
+// What the tickets are actually ABOUT, not which channel they came in on.
+// Automated mail is the largest single bucket and would flatten every real
+// issue next to it, so it's counted below the chart instead of inside it.
+function CategoryPanel({ byCategory, awaiting, labels }) {
+  if (!byCategory) {
+    return (
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="chart-title">Tickets by issue</div>
+        <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>
+          Not set up yet — run <code>supabase/categories.sql</code> in the Supabase SQL editor,
+          then the tickets get labelled automatically.
+        </div>
+      </div>
+    );
+  }
+  const name = (k) => labels?.[k] || k;
+  const strip = (o) =>
+    Object.fromEntries(
+      Object.entries(o || {}).filter(([k]) => k !== "notification" && k !== "uncategorized")
+    );
+  const issues = strip(byCategory);
+  const waiting = strip(awaiting);
+  const auto = byCategory.notification || 0;
+  const todo = byCategory.uncategorized || 0;
+  const named = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [name(k), v]));
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+      <div className="card">
+        <div className="chart-title">Tickets by issue</div>
+        <BarChart data={named(issues)} />
+        <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 8 }}>
+          Excludes {auto} automated notifications
+          {todo ? ` · ${todo} not labelled yet` : ""}
+        </div>
+      </div>
+      <div className="card">
+        <div className="chart-title">Awaiting Response · by issue</div>
+        {Object.keys(waiting).length ? (
+          <BarChart data={named(waiting)} />
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 6 }}>
+            Nothing waiting on a customer right now.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

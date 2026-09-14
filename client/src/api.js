@@ -66,6 +66,14 @@ export const api = {
     req(`/tickets/${id}/merge`, { method: "POST", body: JSON.stringify({ ids }) }),
   feedbackMetrics: (days = 90) => req(`/feedback/metrics?days=${days}`),
   resolutionMetric: (period = "all") => req(`/metrics/resolution?period=${encodeURIComponent(period)}`),
+  // period: days | weeks | months | custom (custom needs from/to as YYYY-MM-DD)
+  trend: ({ period = "days", n, from, to } = {}) =>
+    req(
+      `/metrics/trend?period=${encodeURIComponent(period)}` +
+        (n ? `&n=${n}` : "") +
+        (from ? `&from=${from}` : "") +
+        (to ? `&to=${to}` : "")
+    ),
   templates: () => req(`/templates`),
   wixOrders: (email) => req(`/wix/orders?email=${encodeURIComponent(email || "")}`),
   wixProducts: (q) => req(`/wix/products?q=${encodeURIComponent(q || "")}`),
@@ -137,7 +145,8 @@ export const api = {
 export const KB_SOURCES = {
   manual: { label: "Manual", color: "#8a8378" },
   web: { label: "Web", color: "#3b7a57" },
-  dropbox: { label: "Dropbox", color: "#0061ff" },
+  // "dropbox" is deliberately absent — those articles fall back to the Manual
+  // badge, so the KB no longer advertises where a document happened to live.
   "zoho-template": { label: "Template", color: "#c8a24a" },
   youtube: { label: "Video", color: "#ff0033" },
   "resolved-ticket": { label: "Resolved case", color: "#7a5cff" },

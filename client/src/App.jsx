@@ -19,17 +19,21 @@ export default function App() {
   const [auth, setAuth] = useState({ checked: false, authed: false, enabled: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [signature, setSignature] = useState("");
+  const [targets, setTargets] = useState(null);
   const [inboxSearch, setInboxSearch] = useState("");
 
   useEffect(() => {
     if (!auth.authed) return;
-    api.getSettings().then((s) => setSignature(s.signature || "")).catch(() => {});
+    api.getSettings()
+      .then((s) => { setSignature(s.signature || ""); setTargets(s.targets || null); })
+      .catch(() => {});
   }, [auth.authed]);
 
-  const saveSignature = async (val) => {
+  const saveSettings = async (patch) => {
     try {
-      const s = await api.saveSettings({ signature: val });
+      const s = await api.saveSettings(patch);
       setSignature(s.signature || "");
+      setTargets(s.targets || null);
       setSettingsOpen(false);
     } catch (e) {
       alert(`Could not save: ${e.message}`);
@@ -143,22 +147,48 @@ export default function App() {
       {tab === "kb" && <KnowledgeBase />}
 
       {settingsOpen && (
-        <SignatureModal
+        <SettingsModal
           initial={signature}
+          initialTargets={targets}
           onClose={() => setSettingsOpen(false)}
-          onSave={saveSignature}
+          onSave={saveSettings}
         />
       )}
     </div>
   );
 }
 
-// Edit the outgoing reply signature (HTML). Appended to every reply.
-function SignatureModal({ initial, onClose, onSave }) {
+// App settings: the outgoing reply signature, and the service targets the
+// dashboard measures against (kept here so the team can move a goal without
+// waiting on a deploy).
+function SettingsModal({ initial, initialTargets, onClose, onSave }) {
   const [val, setVal] = useState(initial || "");
+  const [res, setRes] = useState(initialTargets?.resolutionHours ?? 48);
+  const [wait, setWait] = useState(initialTargets?.waitHours ?? 24);
+  const numField = {
+    width: 80, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8,
+    background: "#fffef9", fontSize: 13,
+  };
   return (
     <div className="lightbox" onClick={onClose} style={{ alignItems: "flex-start", paddingTop: "8vh" }}>
-      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, padding: 22, cursor: "default" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, padding: 22, cursor: "default", maxHeight: "80vh", overflowY: "auto" }}>
+        <h3 style={{ margin: "0 0 4px" }}>Targets</h3>
+        <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 0 12px" }}>
+          The goals the dashboard colours against and draws as a line on the weekly chart.
+        </p>
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginBottom: 22 }}>
+          <label style={{ fontSize: 13 }}>
+            <div style={{ marginBottom: 5, color: "var(--ink-soft)" }}>Resolution time</div>
+            <input type="number" min="1" max="2000" value={res} onChange={(e) => setRes(e.target.value)} style={numField} />
+            <span style={{ marginLeft: 6, color: "var(--ink-faint)" }}>hours</span>
+          </label>
+          <label style={{ fontSize: 13 }}>
+            <div style={{ marginBottom: 5, color: "var(--ink-soft)" }}>Max wait on an open ticket</div>
+            <input type="number" min="1" max="2000" value={wait} onChange={(e) => setWait(e.target.value)} style={numField} />
+            <span style={{ marginLeft: 6, color: "var(--ink-faint)" }}>hours</span>
+          </label>
+        </div>
+
         <h3 style={{ margin: "0 0 4px" }}>Reply signature</h3>
         <p style={{ fontSize: 13, color: "var(--ink-faint)", margin: "0 0 12px" }}>
           HTML appended to the end of every reply (AI drafts include it automatically). Use the team's
@@ -174,7 +204,17 @@ function SignatureModal({ initial, onClose, onSave }) {
         <div className="email-html" style={{ border: "1px solid var(--line-soft)", borderRadius: 8, padding: 10, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: val }} />
         <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={() => onSave(val)}>Save signature</button>
+          <button
+            className="btn primary"
+            onClick={() =>
+              onSave({
+                signature: val,
+                targets: { resolutionHours: Number(res), waitHours: Number(wait) },
+              })
+            }
+          >
+            Save settings
+          </button>
         </div>
       </div>
     </div>

@@ -1,28 +1,51 @@
 // server/settings.js
 // Small app-wide settings stored in the shared app_state table (so they persist
-// and are the same for everyone). Currently: the outgoing reply signature.
+// and are the same for everyone): the outgoing reply signature and the service
+// targets the dashboard measures against.
 
 import { supabase } from "./supabase.js";
 
 export const DEFAULT_SIGNATURE = `<p>Regards,<br><strong>Stylish Customer Care</strong><br>Stylish International Inc.<br><a href="https://www.stylishkb.com">www.stylishkb.com</a> | 1-855-789-5352</p>`;
 
+// Goals the dashboard draws as a line and colours against. Kept as settings
+// rather than constants so the team can move them without a deploy.
+export const DEFAULT_TARGETS = {
+  resolutionHours: 48, // time from ticket created to closed
+  waitHours: 24,       // how long an open ticket may sit without a reply
+};
+
+const cleanTargets = (t) => {
+  const num = (v, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 && n <= 2000 ? n : fallback;
+  };
+  return {
+    resolutionHours: num(t?.resolutionHours, DEFAULT_TARGETS.resolutionHours),
+    waitHours: num(t?.waitHours, DEFAULT_TARGETS.waitHours),
+  };
+};
+
 export async function getSettings() {
   let signature = DEFAULT_SIGNATURE;
+  let targets = { ...DEFAULT_TARGETS };
   try {
     if (supabase) {
       const { data } = await supabase
         .from("app_state").select("value").eq("key", "settings").maybeSingle();
       if (data?.value?.signature != null) signature = data.value.signature;
+      if (data?.value?.targets) targets = cleanTargets(data.value.targets);
     }
   } catch {
-    /* fall back to default */
+    /* fall back to defaults */
   }
-  return { signature };
+  return { signature, targets };
 }
 
 export async function saveSettings(patch) {
   const current = await getSettings();
   const next = { ...current, ...patch };
+  // a bad number here would silently break the dashboard's goal lines
+  next.targets = cleanTargets(next.targets);
   if (supabase) {
     await supabase.from("app_state").upsert({
       key: "settings",

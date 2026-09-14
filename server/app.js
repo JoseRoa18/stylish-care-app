@@ -28,6 +28,8 @@ import { wayfairConfigured, lookupWayfairPos, getRecentCancellations } from "./w
 import { sendChatMessage } from "./wix.js";
 import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThread } from "./bestbuy.js";
 import { walmartConfigured, lookupWalmartOrders } from "./walmart.js";
+import { categorizePending, CATEGORIES } from "./categorize.js";
+import { getSettings } from "./settings.js";
 import {
   ringcentralConfigured,
   getMedia,
@@ -55,6 +57,12 @@ function weekStartUTC(d) {
   dt.setUTCDate(dt.getUTCDate() - dow);
   dt.setUTCHours(0, 0, 0, 0);
   return dt;
+}
+
+// category RPC rows → { category: count }. Null when the migration hasn't run.
+function catCounts(rows) {
+  if (!rows?.data) return null;
+  return Object.fromEntries(rows.data.map((r) => [r.category, Number(r.count)]));
 }
 
 // Average resolution time bucketed by the week a ticket was CLOSED, last N weeks.
@@ -313,16 +321,24 @@ export function createApp() {
   app.get("/api/dashboard", async (_req, res) => {
     try {
       await maybeSync(); // keep the tickets table fresh (throttled to ~2 min)
-      const [kb, metrics, byStatusRows, byChannelRows, perDayRows, openWaitRows] = await Promise.all([
-        sourceCounts(),
-        supabase.rpc("ticket_metrics"),
-        supabase.rpc("tickets_by_status"),
-        supabase.rpc("tickets_by_channel"),
-        supabase.rpc("tickets_per_day", { num_days: 7 }),
-        // wait times for open-TYPE tickets only — Awaiting Response means the
-        // ball is in the CUSTOMER's court, so it doesn't belong in "avg wait"
-        supabase.from("tickets").select("customer_response_time").in("status", ["Open", "Escalated"]),
-      ]);
+      const [kb, metrics, byStatusRows, byChannelRows, perDayRows, openWaitRows, byCatRows, awaitingCatRows, settings] =
+        await Promise.all([
+          sourceCounts(),
+          supabase.rpc("ticket_metrics"),
+          supabase.rpc("tickets_by_status"),
+          supabase.rpc("tickets_by_channel"),
+          supabase.rpc("tickets_per_day", { num_days: 7 }),
+          // wait times for open-TYPE tickets only — Awaiting Response means the
+          // ball is in the CUSTOMER's court, so it doesn't belong in "avg wait"
+          supabase.from("tickets").select("customer_response_time").in("status", ["Open", "Escalated"]),
+          // categories come back empty until supabase/categories.sql is run —
+          // the rest of the dashboard must not fail because of that
+          supabase.rpc("tickets_by_category", { num_days: 0 }).then((r) => r, () => ({ data: null })),
+          supabase.rpc("awaiting_by_category").then((r) => r, () => ({ data: null })),
+          getSettings().catch(() => ({ targets: null })),
+        ]);
+      // label whatever arrived since the last visit, in the background
+      categorizePending({ limit: 60 }).catch(() => {});
       const m = metrics.data || {};
       const round = (x) => (x != null ? Math.round(Number(x)) : null);
       const byStatus = Object.fromEntries(
@@ -384,8 +400,56 @@ export function createApp() {
         callsPerDay,
         combinedPerDay,
         resolutionByWeek,
+        byCategory: catCounts(byCatRows),
+        awaitingByCategory: catCounts(awaitingCatRows),
+        categoryLabels: CATEGORIES,
+        targets: settings?.targets || null,
         lastFetch: new Date().toISOString(),
         error: null,
+      });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // New-ticket trend at the granularity the user picked. "custom" takes an
+  // explicit from/to; the named periods are rolling windows ending today.
+  app.get("/api/metrics/trend", async (req, res) => {
+    const period = String(req.query.period || "days");
+    const iso = (d) => new Date(d).toISOString().slice(0, 10);
+    try {
+      let rows, fmt;
+      if (period === "custom") {
+        const from = String(req.query.from || "");
+        const to = String(req.query.to || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+          return res.status(400).json({ error: "custom needs from and to as YYYY-MM-DD" });
+        }
+        if (from > to) return res.status(400).json({ error: "from is after to" });
+        // a long custom range at daily granularity is unreadable as a column
+        // chart, so roll it up the way the named periods do
+        const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+        if (days > 370) return res.status(400).json({ error: "range is longer than a year" });
+        rows = await supabase.rpc("tickets_per_day_range", { start_day: from, end_day: to });
+        fmt = { month: "short", day: "numeric" };
+      } else if (period === "weeks") {
+        rows = await supabase.rpc("tickets_per_week", { num_weeks: Number(req.query.n) || 12 });
+        fmt = { month: "short", day: "numeric" };
+      } else if (period === "months") {
+        rows = await supabase.rpc("tickets_per_month", { num_months: Number(req.query.n) || 12 });
+        fmt = { month: "short", year: "2-digit" };
+      } else {
+        rows = await supabase.rpc("tickets_per_day", { num_days: Number(req.query.n) || 7 });
+        fmt = { month: "short", day: "numeric" };
+      }
+      if (rows.error) throw new Error(rows.error.message);
+      res.json({
+        period,
+        points: (rows.data || []).map((r) => ({
+          label: new Date(r.day + "T00:00:00").toLocaleDateString(undefined, fmt),
+          date: iso(r.day + "T00:00:00"),
+          count: Number(r.count),
+        })),
       });
     } catch (err) {
       res.status(502).json({ error: err.message });
