@@ -26,8 +26,14 @@ export const api = {
   login: (password) =>
     req("/login", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => req("/logout", { method: "POST" }),
-  dashboard: ({ period = "90d", includeNotifications = false } = {}) =>
-    req(`/dashboard?period=${encodeURIComponent(period)}${includeNotifications ? "&notifications=include" : ""}`),
+  // Returns the selected window AND a `periods` map with every preset already
+  // computed, so switching period needs no further request. Pass from/to
+  // (YYYY-MM-DD) for a custom range, which can't be precomputed.
+  dashboard: ({ period = "90d", from, to } = {}) =>
+    req(
+      `/dashboard?period=${encodeURIComponent(period)}` +
+        (from && to ? `&from=${from}&to=${to}` : "")
+    ),
   modelReports: (days = 0) => req(`/metrics/models?days=${days}`),
   surveyMetrics: (days = 90) => req(`/survey/metrics?days=${days}`),
   inbox: ({ view = "active", q = "", page = 1, pageSize = 50, sort = "updated" } = {}) =>

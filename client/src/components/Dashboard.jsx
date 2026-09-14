@@ -28,27 +28,56 @@ function waitColor(ms) {
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90, "180d": 180, "365d": 365, all: 0 };
 const PERIOD_LABELS = { "7d": "7 days", "30d": "30 days", "90d": "90 days", "180d": "6 months", "365d": "1 year", all: "All time" };
 
+const today = () => new Date().toISOString().slice(0, 10);
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const dateField = {
+  padding: "3px 7px", border: "1px solid var(--line)", borderRadius: 6,
+  background: "var(--card)", color: "var(--ink-soft)", fontSize: 11.5,
+};
+const customDays = (r) =>
+  r.from && r.to ? Math.round((new Date(r.to) - new Date(r.from)) / 86400000) + 1 : 0;
+
 export default function Dashboard({ onOpenInbox }) {
-  const [data, setData] = useState(null);
+  const [bundle, setBundle] = useState(null);   // every preset, from one request
+  const [custom, setCustom] = useState(null);   // the custom range, when asked for
+  const [customLoading, setCustomLoading] = useState(false);
   const [fb, setFb] = useState(null);
   const [wf, setWf] = useState(null);
   const [models, setModels] = useState(null);
   const [csat, setCsat] = useState(null);
   const [period, setPeriod] = useState("90d");
+  const [range, setRange] = useState({ from: daysAgo(30), to: today() });
   const [err, setErr] = useState(null);
 
-  // Only what actually depends on the period reloads when it changes. The
-  // Wayfair panel alone took 2s (it calls their API), and refetching it on
-  // every click is what made switching feel slow.
+  // One request brings every preset window, so clicking a period is a local
+  // swap — no round trip at all. Only a custom range has to ask the server.
   useEffect(() => {
     const load = () => {
-      api.dashboard({ period }).then(setData).catch((e) => setErr(e.message));
-      api.modelReports(PERIOD_DAYS[period] || 0).then(setModels).catch(() => setModels(null));
+      api.dashboard({ period: "90d" })
+        .then((d) => { setBundle(d); setErr(null); })
+        .catch((e) => setErr(e.message));
     };
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
-  }, [period]);
+  }, []);
+
+  useEffect(() => {
+    if (period !== "custom") return;
+    if (!range.from || !range.to || range.from > range.to) return;
+    setCustomLoading(true);
+    api.dashboard({ period: "custom", from: range.from, to: range.to })
+      .then((d) => setCustom(d))
+      .catch((e) => setErr(e.message))
+      .finally(() => setCustomLoading(false));
+  }, [period, range.from, range.to]);
+
+  // model reports do follow the period, but they are a 0.4s call and only two
+  // panels depend on them
+  useEffect(() => {
+    const days = period === "custom" ? customDays(range) : PERIOD_DAYS[period] || 0;
+    api.modelReports(days).then(setModels).catch(() => setModels(null));
+  }, [period, range.from, range.to]);
 
   // these three answer their own fixed windows, so they load once
   useEffect(() => {
@@ -57,8 +86,12 @@ export default function Dashboard({ onOpenInbox }) {
     api.surveyMetrics(90).then((r) => setCsat(r.metrics)).catch(() => setCsat(null));
   }, []);
 
-  if (err) return <div className="banner error">Could not load dashboard: {err}</div>;
-  if (!data) return <div className="empty"><span className="spin" /> Loading…</div>;
+  if (err && !bundle) return <div className="banner error">Could not load dashboard: {err}</div>;
+  if (!bundle) return <div className="empty"><span className="spin" /> Loading…</div>;
+
+  // the selected window: a local lookup for presets, the fetched one for custom
+  const windowData = period === "custom" ? custom : bundle.periods?.[period];
+  const data = { ...bundle, ...(windowData || {}) };
 
   const lastFetch = data.lastFetch ? new Date(data.lastFetch).toLocaleString() : "—";
   const connectors = [
@@ -88,6 +121,30 @@ export default function Dashboard({ onOpenInbox }) {
             {label}
           </button>
         ))}
+        <button
+          className={`btn sm ${period === "custom" ? "primary" : ""}`}
+          onClick={() => setPeriod("custom")}
+          style={{ fontSize: 11, padding: "3px 10px" }}
+        >
+          Custom
+        </button>
+        {period === "custom" && (
+          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--ink-faint)" }}>
+            <input
+              type="date" value={range.from} max={range.to}
+              onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+              style={dateField}
+            />
+            to
+            <input
+              type="date" value={range.to} min={range.from} max={today()}
+              onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+              style={dateField}
+            />
+            {customLoading && <span className="spin" />}
+            {!customLoading && customDays(range) > 0 && <span>{customDays(range)} days</span>}
+          </span>
+        )}
         {/* automated mail is never what the team wants to see — the count is
             kept visible so the numbers are not silently smaller than reality */}
         {data.notifications > 0 && (

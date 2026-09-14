@@ -30,7 +30,7 @@ import { bestbuyConfigured, listThreads, getThread, draftThreadReply, replyToThr
 import { walmartConfigured, lookupWalmartOrders } from "./walmart.js";
 import { categorizePending, CATEGORIES } from "./categorize.js";
 import { getSettings } from "./settings.js";
-import { dashboardData, memo } from "./dashboard.js";
+import { dashboardData, allPeriods, customPeriod, memo } from "./dashboard.js";
 import { detectPending, modelReport } from "./models.js";
 import { sendSurvey, getSurvey, answerSurvey, surveyMetrics, QUESTIONS } from "./surveys.js";
 import {
@@ -364,15 +364,22 @@ export function createApp() {
       // every call, which is what made switching periods feel broken — and the
       // dashboard reads the table, not Zoho, so at worst it is one sync behind.
       maybeSync().catch(() => {});
-      const period = String(req.query.period || "90d");
       const includeNotifications = req.query.notifications === "include";
-      // none of these three change with the period, so they are memoised —
-      // re-running them on every period click was most of the wait
-      const [data, kb, settings] = await Promise.all([
-        dashboardData({ period, includeNotifications }),
+      const { from, to } = req.query;
+      const isCustom = /^\d{4}-\d{2}-\d{2}$/.test(from || "") && /^\d{4}-\d{2}-\d{2}$/.test(to || "");
+      if (isCustom && from > to) return res.status(400).json({ error: "from is after to" });
+
+      // Every preset window is computed from ONE read and sent together, so
+      // switching period is a local swap in the browser rather than a request.
+      // A custom range is the exception: it can't be precomputed.
+      const [periods, kb, settings] = await Promise.all([
+        isCustom
+          ? customPeriod({ from, to, includeNotifications }).then((d) => ({ custom: d }))
+          : allPeriods({ includeNotifications }),
         memo("kb-counts", 60_000, () => sourceCounts()).catch(() => ({ total: 0 })),
         memo("settings", 30_000, () => getSettings()).catch(() => ({ targets: null })),
       ]);
+      const data = isCustom ? periods.custom : periods[String(req.query.period || "90d")] || periods["90d"];
       // label whatever arrived since the last visit, in the background
       categorizePending({ limit: 60 }).catch(() => {});
       detectPending({ limit: 200 }).catch(() => {});
@@ -400,6 +407,8 @@ export function createApp() {
 
       res.json({
         ...data,
+        // every preset window, so the client switches without another request
+        periods,
         zoho: zohoConfigured(),
         gemini: geminiConfigured(),
         kbArticles: kb.total,

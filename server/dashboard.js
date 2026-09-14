@@ -73,12 +73,24 @@ async function fetchRows() {
   return rows;
 }
 
-async function load({ days, includeNotifications }) {
-  const rows = await allRows();
-  const since = days > 0 ? Date.now() - days * DAY : null;
-  const keep = (r) =>
-    (includeNotifications || r.category !== "notification") &&
-    (!since || new Date(r.created_time).getTime() >= since);
+// A window is a [from, to) pair of epoch ms; null means unbounded.
+function windowOf(period, custom) {
+  if (period === "custom" && custom?.from && custom?.to) {
+    const from = new Date(custom.from + "T00:00:00Z").getTime();
+    // `to` is inclusive for the user, so run to the end of that day
+    const to = new Date(custom.to + "T00:00:00Z").getTime() + DAY;
+    return { from, to, days: Math.round((to - from) / DAY) };
+  }
+  const days = PERIODS[period] ?? PERIODS["90d"];
+  return { from: days > 0 ? Date.now() - days * DAY : null, to: null, days };
+}
+
+function load(rows, { from, to, includeNotifications }) {
+  const keep = (r) => {
+    if (!includeNotifications && r.category === "notification") return false;
+    const t = new Date(r.created_time).getTime();
+    return (from == null || t >= from) && (to == null || t < to);
+  };
   return { all: rows, window: rows.filter(keep) };
 }
 
@@ -131,9 +143,29 @@ function series(rows, days) {
   return out.map((p) => ({ ...p, label: new Date(p.date + "T00:00:00").toLocaleDateString(undefined, fmt) }));
 }
 
+// Compute EVERY preset window from one read. Aggregating cached rows costs a
+// few milliseconds, so sending them all at once lets the client switch periods
+// with no round trip at all — which is what actually made it feel slow.
+export async function allPeriods({ includeNotifications = false } = {}) {
+  const rows = await allRows();
+  const out = {};
+  for (const period of Object.keys(PERIODS)) {
+    out[period] = aggregate(rows, period, null, includeNotifications);
+  }
+  return out;
+}
+
+export async function customPeriod({ from, to, includeNotifications = false } = {}) {
+  return aggregate(await allRows(), "custom", { from, to }, includeNotifications);
+}
+
 export async function dashboardData({ period = "90d", includeNotifications = false } = {}) {
-  const days = PERIODS[period] ?? PERIODS["90d"];
-  const { all, window } = await load({ days, includeNotifications });
+  return aggregate(await allRows(), period, null, includeNotifications);
+}
+
+function aggregate(rows, period, custom, includeNotifications) {
+  const { from, to, days } = windowOf(period, custom);
+  const { all, window } = load(rows, { from, to, includeNotifications });
 
   const openRows = all.filter(
     (r) => isOpenType(r.status) && (includeNotifications || r.category !== "notification")
@@ -159,9 +191,11 @@ export async function dashboardData({ period = "90d", includeNotifications = fal
     closed: window.filter((r) => isClosed(r.status)).length,
     // how much of the window was automated mail — shown so the filter is honest
     // about what it is hiding rather than quietly shrinking every number
-    notifications: all.filter(
-      (r) => r.category === "notification" && (!days || new Date(r.created_time).getTime() >= Date.now() - days * DAY)
-    ).length,
+    notifications: all.filter((r) => {
+      if (r.category !== "notification") return false;
+      const t = new Date(r.created_time).getTime();
+      return (from == null || t >= from) && (to == null || t < to);
+    }).length,
     uncategorized: window.filter((r) => !r.category).length,
     byStatus: tally(window, "status", "Unknown"),
     byChannel: tally(window, "channel"),
