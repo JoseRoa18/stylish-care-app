@@ -36,6 +36,13 @@ const RT_MAX_AGE_MONTHS = Number(process.env.RT_MAX_AGE_MONTHS || 24);
 const RESERVE_SOURCES = ["youtube", "zoho-template"];
 const RESERVE_MARGIN = Number(process.env.RETRIEVAL_RESERVE_MARGIN || 0.1); // within this of the top score
 const RESERVE_FLOOR = Number(process.env.RETRIEVAL_RESERVE_FLOOR || 0.6); // and at least this similar absolutely
+// At most this many resolved cases per draft: they are examples, and drafts
+// leaning on 3+ of them were the ones most heavily rewritten. Near-identical
+// twins (same title, or embeddings this close) count once. Cases that differ in
+// the deciding detail — with vs without proof of purchase — sit around 0.95
+// and are both kept.
+const RT_MAX = Number(process.env.RETRIEVAL_RT_MAX || 3);
+const RT_TWIN = Number(process.env.RETRIEVAL_RT_TWIN || 0.985);
 
 // Preferred entry point: semantic (pgvector) search, falling back to a Postgres
 // keyword search if embeddings are unavailable. Both hit Supabase directly, so
@@ -43,16 +50,25 @@ const RESERVE_FLOOR = Number(process.env.RETRIEVAL_RESERVE_FLOOR || 0.6); // and
 export async function retrieveRelevant({ ticket, conversation }, k = 8) {
   const query = buildQuery({ ticket, conversation });
   try {
-    let pool = await semanticSearch(query, null, Math.max(POOL, k));
+    const pool = await semanticSearch(query, null, Math.max(POOL, k));
     if (pool && pool.length) {
-      pool = await applyRecency(pool);
-      return diversify(pool, k);
+      let out = diversify(await applyRecency(pool), k);
+      // Capping past cases leaves slots empty when they fill nearly the whole
+      // pool ("return label": 38 of 40) — look further down once for the
+      // policy pages and templates.
+      if (out.length < k && pool.length >= POOL) {
+        const wider = await semanticSearch(query, null, POOL * 3).catch(() => null);
+        if (wider && wider.length > pool.length) out = diversify(await applyRecency(wider), k);
+      }
+      return out;
     }
   } catch {
     // embedding unavailable/errored → keyword fallback below
   }
   try {
-    return await keywordSearch(query, k);
+    // same cap on resolved cases as the semantic path (with some surplus so
+    // the cap still leaves k to fill)
+    return diversify(await keywordSearch(query, k * 2), k);
   } catch {
     return [];
   }
@@ -62,24 +78,39 @@ export async function retrieveRelevant({ ticket, conversation }, k = 8) {
 // similarly-relevant past cases the most RECENT resolution wins (current policy)
 // instead of a years-old one. Other sources (manuals/templates/web) are
 // reference material and aren't time-decayed.
+//
+// A case's date is its ticket's close date (updated_at on resolved-ticket rows;
+// kb.js keeps it when the team edits an entry). Embeddings come along for the
+// strongest few cases only, so diversify() can spot twins without pulling 40
+// vectors per draft.
 async function applyRecency(pool) {
-  const rtIds = pool.filter((a) => a.source === "resolved-ticket").map((a) => a.id);
-  if (!rtIds.length) return pool;
-  let dates;
+  const rts = pool.filter((a) => a.source === "resolved-ticket");
+  if (!rts.length) return pool;
+  let dated, vecs;
   try {
-    const { data } = await supabase.from("kb_articles").select("id,updated_at").in("id", rtIds);
-    dates = new Map((data || []).map((r) => [r.id, r.updated_at]));
+    [dated, vecs] = await Promise.all([
+      supabase.from("kb_articles").select("id,updated_at").in("id", rts.map((a) => a.id)),
+      supabase.from("kb_articles").select("id,embedding").in("id", rts.slice(0, RT_MAX * 3).map((a) => a.id)),
+    ]);
   } catch {
     return pool; // dates unavailable → leave ranking as-is
   }
+  // supabase-js reports a failed query in `error` rather than throwing — read
+  // as "no dates", every case looked ancient and was dropped from every draft
+  if (dated.error || !dated.data) return pool;
+  const dates = new Map(dated.data.map((r) => [r.id, r.updated_at]));
+  const vec = new Map((vecs.error ? [] : vecs.data || []).map((r) => [r.id, parseVector(r.embedding)]));
   const now = Date.now();
   const out = [];
   for (const a of pool) {
     if (a.source === "resolved-ticket") {
       const d = dates.get(a.id);
-      const ageMonths = d ? (now - new Date(d).getTime()) / (30 * 86400000) : 999;
-      if (ageMonths > RT_MAX_AGE_MONTHS) continue; // too old to trust — drop it
-      a._score = (a._score ?? 0) - Math.min(0.12, Math.max(0, (ageMonths - 1) * 0.01));
+      if (d) {
+        const ageMonths = (now - new Date(d).getTime()) / (30 * 86400000);
+        if (ageMonths > RT_MAX_AGE_MONTHS) continue; // too old to trust — drop it
+        a._score = (a._score ?? 0) - Math.min(0.12, Math.max(0, (ageMonths - 1) * 0.01));
+      }
+      a._vec = vec.get(a.id) || null;
     }
     out.push(a);
   }
@@ -87,16 +118,39 @@ async function applyRecency(pool) {
   return out;
 }
 
+function parseVector(v) {
+  if (Array.isArray(v)) return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+// Same case twice: identical title, or embeddings nearly identical (they are
+// L2-normalised, so the dot product is the cosine).
+function isTwin(a, b) {
+  const t = (x) => String(x.title || "").trim().toLowerCase();
+  if (t(a) && t(a) === t(b)) return true;
+  if (!a._vec || !b._vec || a._vec.length !== b._vec.length) return false;
+  let dot = 0;
+  for (let i = 0; i < a._vec.length; i++) dot += a._vec[i] * b._vec[i];
+  return dot >= RT_TWIN;
+}
+
 // Guarantee the final set keeps a slot for the best video tutorial and the best
 // reply template WHEN they're clearly relevant (close to the top match), then
 // fill the rest by score. A reserved item that isn't relevant enough is simply
 // not forced in — so we never inject an off-topic video. Items already in the
-// natural top-k cost no extra slot (deduped by id).
+// natural top-k cost no extra slot (deduped by id). Resolved cases are capped
+// at RT_MAX, best (and, at similar scores, most recent) first, twins once.
 export function diversify(pool, k) {
-  if (pool.length <= k) return pool;
   const top = pool[0]?._score ?? 0;
   const floor = Math.max(RESERVE_FLOOR, top - RESERVE_MARGIN);
   const chosen = new Map();
+  const cases = [];
+  const admit = (a) => {
+    if (a.source !== "resolved-ticket") return true;
+    if (cases.length >= RT_MAX || cases.some((c) => isTwin(a, c))) return false;
+    cases.push(a);
+    return true;
+  };
   for (const src of RESERVE_SOURCES) {
     if (chosen.size >= k) break;
     const best = pool.find((a) => a.source === src && (a._score ?? 0) >= floor);
@@ -104,11 +158,13 @@ export function diversify(pool, k) {
   }
   for (const a of pool) {
     if (chosen.size >= k) break;
+    if (chosen.has(a.id) || !admit(a)) continue;
     chosen.set(a.id, a);
   }
   return [...chosen.values()]
     .sort((x, y) => (y._score ?? 0) - (x._score ?? 0))
-    .slice(0, k);
+    .slice(0, k)
+    .map(({ _vec, ...a }) => a);
 }
 
 // Build a search query from the ticket: subject + the customer's words.

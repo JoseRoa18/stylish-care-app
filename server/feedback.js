@@ -86,6 +86,33 @@ export async function recordFeedback({
   return { editClass: cls, editRatio: row.edit_ratio };
 }
 
+// Who wrote each reply the app sends, keyed by the Zoho thread it became. The
+// KB learner (resolved-tickets.js) reads it to tell the team's own words from
+// AI drafts sent as they were. reply_feedback can't: it only covers AI drafts
+// (so "Improve" and inserted templates looked hand-written) and has no thread
+// id. Kept per ticket in app_state, so the dashboard metrics don't change.
+export async function recordSend({ ticketId, threadId, origin = {}, editClass = null }) {
+  if (!supabase || !ticketId) return;
+  const key = `sent:${ticketId}`;
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", key).maybeSingle();
+  if (error) throw new Error(error.message);
+  const at = new Date().toISOString();
+  const sends = [
+    ...(data?.value?.sends || []),
+    {
+      at,
+      thread: threadId ? String(threadId) : null,
+      ai: Boolean(origin.ai),          // started from an AI draft
+      editClass,                        // how much of that draft was changed
+      notes: Boolean(origin.notes),     // AI wrote it from the agent's own notes
+      improved: Boolean(origin.improved),
+      template: Boolean(origin.template),
+    },
+  ].slice(-40);
+  const { error: e2 } = await supabase.from("app_state").upsert({ key, value: { sends }, updated_at: at });
+  if (e2) throw new Error(e2.message);
+}
+
 export async function feedbackMetrics(days = 90) {
   if (!supabase) return { total: 0 };
   // Degrade gracefully if the table/RPC isn't created yet (run feedback.sql) —

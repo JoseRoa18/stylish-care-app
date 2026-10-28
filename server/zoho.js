@@ -77,7 +77,7 @@ async function mintToken(attempt = 0) {
       if (shared) return shared;
       return mintToken(attempt + 1);
     }
-    throw new Error(`Zoho token refresh failed (${res.status}): ${JSON.stringify(data)}`);
+    throw Object.assign(new Error(`Zoho token refresh failed (${res.status}): ${JSON.stringify(data)}`), { auth: true });
   }
   return {
     value: data.access_token,
@@ -87,8 +87,9 @@ async function mintToken(attempt = 0) {
 
 async function getAccessToken() {
   if (!configured()) {
-    throw new Error(
-      "Zoho is not configured. Set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN in .env"
+    throw Object.assign(
+      new Error("Zoho is not configured. Set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN in .env"),
+      { auth: true }
     );
   }
   if (tokenFresh(_token)) return _token.value;
@@ -140,7 +141,9 @@ async function zohoFetch(path, options = {}, _retried = false) {
     }
     const msg =
       (body && (body.message || body.errorCode)) || `HTTP ${res.status}`;
-    throw new Error(`Zoho Desk error: ${msg}`);
+    // status and auth let a caller tell "this ticket isn't there" from "we
+    // can't log in" (the KB learner must not file the second as gone)
+    throw Object.assign(new Error(`Zoho Desk error: ${msg}`), { status: res.status, auth: invalidToken });
   }
   return body;
 }
@@ -402,16 +405,27 @@ function sanitizeEmailHtml(html) {
   return s.trim();
 }
 
+// At most `max` threads, oldest first: the `head` oldest (where the customer's
+// question is) plus the newest — what's dropped is the middle of a long ticket.
+function pickThreads(threads, max, head) {
+  const sorted = [...threads].sort((a, b) => (a.createdTime > b.createdTime ? 1 : -1));
+  if (sorted.length <= max) return sorted;
+  const keep = Math.min(head, max);
+  return [...sorted.slice(0, keep), ...sorted.slice(sorted.length - (max - keep))];
+}
+
 // Read a ticket's recent conversation. Each message carries BOTH:
 //  • text — quoted-chain-stripped plain text (what the AI drafter uses)
 //  • html — the sanitized original email HTML (what the inbox renders, so
 //    formatting/tables/links survive instead of a mangled wall of text)
 //  • attachments — name/size/id of files on that message
 export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
-  const list = await zohoFetch(
-    `/tickets/${ticketId}/threads?limit=${maxThreads}`
-  );
-  const threads = list?.data || [];
+  // Zoho lists threads NEWEST first, so asking for `limit=maxThreads` dropped
+  // the customer's original question on long tickets — the draft then answered
+  // a thread it couldn't see the start of. List them all (one cheap call) and
+  // keep the oldest plus the newest.
+  const list = await zohoFetch(`/tickets/${ticketId}/threads?limit=100`);
+  const threads = pickThreads(list?.data || [], maxThreads, 1);
   const out = [];
   // fetch full content for each thread (most recent last)
   for (const th of threads) {
@@ -475,6 +489,73 @@ export async function getConversation(ticketId, { maxThreads = 12 } = {}) {
   // chronological order
   out.sort((a, b) => (a.createdTime > b.createdTime ? 1 : -1));
   return out;
+}
+
+// ── reads for the KB learner (server/resolved-tickets.js) ────
+// The ticket alone first: status, close time and thread/note counts decide
+// most skips after ONE call. Null when the ticket is gone for us (deleted,
+// trashed, merged away or moved to another department).
+export async function getTicketForLearning(ticketId) {
+  let t;
+  try {
+    t = await zohoFetch(`/tickets/${ticketId}`);
+  } catch (err) {
+    // Only Desk itself answering that the ticket isn't there (a missing one is
+    // a 404 "The URL you requested could not be found"). A failed login
+    // ("Zoho token refresh failed … invalid_code") or an outage must throw:
+    // the learner files "gone" and stops looking at the ticket.
+    const missing = err.status === 404 || (err.status >= 400 && err.status < 500 && /not.?found|invalid|does not exist/i.test(err.message));
+    if (missing && !err.auth) return null;
+    throw err;
+  }
+  if (!t || t.isDeleted || t.isTrashed) return null;
+  if (t.departmentId && String(t.departmentId) !== String(ZOHO_DEPARTMENT_ID)) return null;
+  return {
+    id: t.id,
+    number: t.ticketNumber,
+    subject: t.subject || "",
+    status: t.status,
+    isSpam: Boolean(t.isSpam),
+    closedTime: t.closedTime || null,
+    threadCount: Number(t.threadCount) || 0,
+    commentCount: Number(t.commentCount) || 0,
+    email: t.email || "",
+    webUrl: t.webUrl || null,
+  };
+}
+
+// Every thread the learner may read, oldest first, with who it went to. Long
+// tickets keep their first two messages (the customer's question) plus the
+// newest; `skip(listItem)` drops threads before their content is fetched (the
+// survey mail), and content is fetched a few at a time instead of one by one.
+export async function getThreadsForLearning(ticketId, { maxThreads = 20, clip = 2500, skip } = {}) {
+  const list = await zohoFetch(`/tickets/${ticketId}/threads?limit=100`);
+  const kept = (list?.data || []).filter((th) => !(skip && skip(th)));
+  const picked = pickThreads(kept, maxThreads, 2);
+  const out = new Array(picked.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < picked.length) {
+      const i = next++;
+      const th = picked[i];
+      let full = null;
+      try {
+        full = await zohoFetch(`/tickets/${ticketId}/threads/${th.id}?include=plainText`);
+      } catch { /* fall back to the list's summary */ }
+      const text = stripQuoted(full?.plainText || htmlToText(full?.content || "") || th.summary || "");
+      out[i] = {
+        id: th.id,
+        direction: th.direction,
+        from: th.fromEmailAddress || "",
+        to: th.to || "",
+        isForward: Boolean(th.isForward),
+        createdTime: th.createdTime,
+        text: text.length > clip ? `${text.slice(0, clip)} […]` : text,
+      };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(5, picked.length) }, worker));
+  return { threads: out, total: kept.length };
 }
 
 // Send a reply directly to the customer (not a draft). `contentType` is

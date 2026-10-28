@@ -55,10 +55,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ticket, instructions }),
     }),
-  send: (id, to, content, contentType = "html", feedback, attachmentIds, cc) =>
+  // origin: how the reply was built ({ notes, improved, template }) — lets the
+  // KB learner tell the team's own words from AI drafts sent as they were
+  send: (id, to, content, contentType = "html", feedback, attachmentIds, cc, origin) =>
     req(`/tickets/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ to, cc, content, contentType, feedback, attachmentIds }),
+      body: JSON.stringify({ to, cc, content, contentType, feedback, attachmentIds, origin }),
     }),
   attachments: (id) => req(`/tickets/${id}/attachments`),
   attachmentUrl: (id, attId, name) =>
@@ -155,6 +157,8 @@ export const api = {
   kbIngest: (key) =>
     req(key ? `/kb/ingest/${key}` : "/kb/ingest", { method: "POST" }),
   kbIngestStatus: () => req("/kb/ingest/status"),
+  // learn from recently closed tickets; returns { learned, skipped, pending, busy? }
+  kbLearn: () => req("/kb/learn", { method: "POST" }),
   manuals: () => req("/dropbox/manuals"),
   // segments: [{ id, t }] text fragments of one email (see translateHtml.js);
   // target: "English" | "Spanish" | "French" → { translations: { [id]: t } }

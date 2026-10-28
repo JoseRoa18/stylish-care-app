@@ -7,6 +7,7 @@
 // Instead a short-lived in-memory TTL cache de-dupes Zoho fetches across
 // requests on a warm instance; the first request after the TTL refreshes it.
 
+import crypto from "node:crypto";
 import express from "express";
 import cors from "cors";
 
@@ -17,6 +18,7 @@ import { zohoConfigured, searchTicketsContent, createTicket, addTicketComment } 
 import { upsertTickets } from "./tickets-sync.js";
 import { listManuals, dropboxConfigured } from "./dropbox.js";
 import { sourceCounts } from "./kb.js";
+import { learnPending } from "./resolved-tickets.js";
 import { geminiConfigured } from "./gemini.js";
 import { supabase } from "./supabase.js";
 import { maybeSync, queryTickets, ticketCounts } from "./tickets-sync.js";
@@ -141,6 +143,31 @@ export function createApp() {
       if (error) throw new Error(error.message);
       try { await maybeSync(0); } catch { /* keepalive still counts as alive */ }
       res.json({ ok: true, pinged: "tickets", count: count ?? null, at: new Date().toISOString() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Learn from newly closed tickets (server/resolved-tickets.js), three times a
+  // day (vercel.json). Unlike keepalive this spends Gemini and Zoho calls, so
+  // it FAILS CLOSED: with no CRON_SECRET set, nobody can run it. Vercel sends
+  // the secret as a Bearer token by itself once it is set on the project.
+  app.get("/api/cron/learn", async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    // compared as fixed-length digests, so the time taken says nothing about the secret
+    const digest = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
+    if (!secret || !crypto.timingSafeEqual(digest(req.headers.authorization), digest(`Bearer ${secret}`))) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    const t0 = Date.now();
+    try {
+      // pick up tickets closed directly in Zoho since the last sync
+      try { await maybeSync(0); } catch { /* learn from what the table already has */ }
+      // the function may run 300 s: stop STARTING tickets at ~200 s so the one
+      // in flight can finish
+      const budget = Number(process.env.LEARN_CRON_BUDGET_MS) || 200_000;
+      const r = await learnPending({ budgetMs: Math.max(0, budget - (Date.now() - t0)), trigger: "cron" });
+      res.json({ ok: true, ...r });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }

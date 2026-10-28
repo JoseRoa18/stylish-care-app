@@ -457,6 +457,26 @@ function draftToHtml(draft) {
     : plainToHtml(d);
 }
 
+// The editor still holds the AI's own draft, or nearly (under 5% of its words
+// changed — feedback.js's "sent as is" line)? Notes made of it are the AI's.
+function nearlyAiDraft(aiDraft, html) {
+  const words = (s) =>
+    s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
+  const a = words(draftToHtml(aiDraft));
+  const b = words(html);
+  const left = new Map();
+  for (const w of a) left.set(w, (left.get(w) || 0) + 1);
+  let same = 0;
+  for (const w of b) {
+    if (left.get(w)) {
+      left.set(w, left.get(w) - 1);
+      same++;
+    }
+  }
+  const n = Math.max(a.length, b.length, 1);
+  return (n - same) / n < 0.05;
+}
+
 // Conversation + internal notes interleaved chronologically. Unless "Show
 // earlier" was clicked only the last 4 items are shown (and translated).
 function buildTimeline(conversation, notes, showAll) {
@@ -941,6 +961,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
   // the ORIGINAL AI draft + triage, kept unmutated so we can measure how much
   // the agent edited it when they send (the feedback loop).
   const [aiMeta, setAiMeta] = useState(null);
+  // how the reply in the editor was built (AI from notes / Improve / a
+  // template), sent along so the KB learns from the team's words, not the AI's
+  const originRef = useRef({});
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState(null);
 
@@ -1105,6 +1128,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
     setDocKey((k) => k + 1);
     setComposing(true);
     setTplOpen(false);
+    originRef.current = { ...originRef.current, template: true };
   };
 
   const improveCurrentDraft = async () => {
@@ -1115,6 +1139,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
       const r = await api.improveDraft(ticket.id, draftHtml);
       setDraftHtml(draftToHtml(r.reply));
       setDocKey((k) => k + 1);
+      originRef.current = { ...originRef.current, improved: true };
     } catch (e) {
       setSendError(`Improve failed: ${e.message}`);
     } finally {
@@ -1153,6 +1178,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
       const saved = JSON.parse(localStorage.getItem(draftKey) || "null");
       if (saved?.html && !draftHtml.replace(/<[^>]*>/g, "").trim()) {
         setDraftHtml(saved.html);
+        // the AI draft it started from isn't kept, so edits to it can't be
+        // measured — it still must not pass for the team's own words
+        originRef.current = { ...(saved.origin || {}), aiRestored: Boolean(saved.ai) };
         if (saved.to) setToEmail(saved.to);
         if (saved.cc) setCc(saved.cc);
         setComposing(true);
@@ -1166,7 +1194,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
     const id = setTimeout(() => {
       try {
         if (draftHtml.replace(/<[^>]*>/g, "").trim()) {
-          localStorage.setItem(draftKey, JSON.stringify({ html: draftHtml, to: toEmail, cc, at: Date.now() }));
+          localStorage.setItem(draftKey, JSON.stringify({ html: draftHtml, to: toEmail, cc, at: Date.now(), ai: Boolean(aiMeta || originRef.current.aiRestored), origin: originRef.current }));
         } else {
           localStorage.removeItem(draftKey);
         }
@@ -1181,6 +1209,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
     setDraftHtml("");
     setDocKey((k) => k + 1);
     setAiMeta(null);
+    originRef.current = {};
     setTriage(null);
     setOutFiles([]);
     setCc("");
@@ -1315,6 +1344,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
     setToEmail("");
     setCc("");
     setAiMeta(null);
+    originRef.current = {};
     setTriage(null);
     setDraftHtml(`<p></p>${header}<blockquote>${orig}</blockquote>`);
     setDocKey((k) => k + 1);
@@ -1373,7 +1403,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
     if (open && !convoLoaded && !convoLoading) loadConversation();
   }, [open, convoLoaded, convoLoading, loadConversation]);
 
-  const generate = useCallback(async (instructions) => {
+  const generate = useCallback(async (instructions, ownNotes = true) => {
     setDrafting(true);
     setDraftError(null);
     try {
@@ -1393,6 +1423,9 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
         sensitive: res.sensitive, lane: res.lane, kbCovered: res.kbCovered,
         usedKb: res.usedKb,
       });
+      // a fresh draft replaces the editor; "write from my notes" carries the
+      // agent's own decision, so the KB may learn from it even if sent as-is
+      originRef.current = { notes: typeof instructions === "string" && Boolean(instructions.trim()) && ownNotes };
     } catch (e) {
       setDraftError(e.message);
     } finally {
@@ -1525,7 +1558,8 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
             }
           : undefined,
         outFiles.map((f) => f.id),
-        cc.trim()
+        cc.trim(),
+        originRef.current
       );
       setSent(true);
       setComposing(false);
@@ -2034,7 +2068,10 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onSt
                     title="Write rough notes of what you want to say — the AI composes the full reply from them (with the ticket's context)"
                     onClick={() => {
                       const plain = draftHtml.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, "").trim();
-                      if (plain) generate(plain);
+                      // pressed on the AI's untouched draft, the "notes" are
+                      // the AI's own words (a restored draft can't be measured)
+                      const fromAi = aiMeta ? nearlyAiDraft(aiMeta.draft, draftHtml) : Boolean(originRef.current.aiRestored);
+                      if (plain) generate(plain, !fromAi || Boolean(originRef.current.notes));
                     }}
                   >
                     {drafting ? <><span className="spin" /> Writing…</> : "AI: write from my notes"}

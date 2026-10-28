@@ -8,6 +8,7 @@ import { ordersToText } from "./wix.js";
 import { shipmentsToText } from "./shipstation.js";
 import { wayfairToText } from "./wayfair.js";
 import { walmartToText } from "./walmart.js";
+import { isExceptionCase } from "./resolved-tickets.js";
 
 const { GEMINI_API_KEY, GEMINI_MODEL } = process.env;
 const MODEL = GEMINI_MODEL || "gemini-3.1-pro-preview";
@@ -61,6 +62,7 @@ ACCURACY (never sacrifice this for tone):
 - Use ONLY facts present in the Knowledge Base or already stated earlier in the thread. Never invent policy, prices, timelines, outcomes, specifications, materials, or part details.
 - Articles tagged "source: zoho-template" are EXAMPLE replies the team has used for similar situations. Treat them as REFERENCE for tone, policy and structure — do NOT copy them word-for-word. Adapt the wording to THIS customer and their specific details, and combine information from several articles when it helps. Fill in specifics (order numbers, names, amounts) only when you actually have them.
 - Articles tagged "source: resolved-ticket" are generalized summaries of how the team actually handled similar PAST cases ("Situation … / How we resolved it …"). Use them as REFERENCE for the right approach, policy and tone for this kind of case — never copy them, and never assume this customer's specifics match the past case (the summaries are anonymized and carry no real names, orders or amounts).
+- A resolved case also tagged "one-off exception — not policy" records a goodwill or money decision (a refund, credit, gift, free replacement, waived fee or manager-approved compensation) made ONCE for that customer. Never present it as policy and never offer or promise it on your own; reflect such an outcome only when the INTERNAL NOTES or the AGENT INSTRUCTIONS authorize it for this customer.
 - Do NOT assert regulatory or compliance claims (e.g. "lead-free", NSF/ANSI, cUPC, certifications) unless those exact claims appear in the Knowledge Base. If a customer asks about them and the KB doesn't confirm, treat it as not covered and escalate.
 - CUSTOMER PHOTOS: when the customer's attached photos are included with this request, look at them and use what is CLEARLY visible to tailor the reply (identify the product/part, acknowledge what they show — it reassures the customer that their photos were reviewed). Observations are context only: never draw a definitive fault/cause/defect conclusion from a photo alone, and never promise an outcome based on it — the formal review still applies (see WARRANTY below).
 - CUSTOMER ORDERS: a "CUSTOMER ORDERS (from store)" section may list this customer's real direct-store orders, a "SHIPMENTS (ShipStation)" section may list orders matched by number across all channels (Amazon, Wayfair, Home Depot, etc.) with their shipment status, carrier and tracking, and a "WAYFAIR PURCHASE ORDERS" section may show the Wayfair-side details of a PO (items, estimated ship date, carrier, warehouse). Use them to answer order/shipping questions precisely — confirm the order number, status, what shipped, and share the tracking number/carrier when present. Only use entries whose details clearly match what the customer is asking about; if none match, don't guess — ask which order they mean. Never invent an order number, tracking number or status that isn't in these sections.
@@ -132,6 +134,8 @@ function kbToText(kb) {
       const meta = [
         a.finish ? `finish: ${a.finish}` : null,
         a.source ? `source: ${a.source}` : null,
+        // a learned goodwill/money decision — never to be read as policy
+        isExceptionCase(a) ? "one-off exception — not policy" : null,
         // expose the URL only for video tutorials, the one link type we allow
         a.source === "youtube" && a.sourceUrl ? `url: ${a.sourceUrl}` : null,
       ]

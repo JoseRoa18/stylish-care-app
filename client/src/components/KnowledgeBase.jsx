@@ -12,6 +12,8 @@ export default function KnowledgeBase() {
   const [err, setErr] = useState(null);
   const [ingesting, setIngesting] = useState(null); // key being ingested
   const [ingestMsg, setIngestMsg] = useState(null);
+  const [learning, setLearning] = useState(false);
+  const [learnMsg, setLearnMsg] = useState(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 24;
 
@@ -54,9 +56,50 @@ export default function KnowledgeBase() {
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this article?")) return;
-    await api.kbDelete(id);
+    const learned = id.startsWith("RT-");
+    if (!confirm(learned ? "Delete this resolved case? It will not be learned again." : "Delete this article?")) return;
+    try {
+      await api.kbDelete(id);
+    } catch (e) {
+      setErr(`Delete failed: ${e.message}`);
+    }
     load();
+  };
+
+  // Each call learns for about 45 s (the server can't keep working after it
+  // answers), so keep calling while closed tickets wait and a call got through some.
+  const learnNow = async () => {
+    setLearning(true);
+    setErr(null);
+    let learned = 0;
+    let checked = 0;
+    let errors = 0;
+    try {
+      for (let round = 0; round < 20; round++) {
+        setLearnMsg(`Learning from closed tickets…${checked ? ` ${checked} checked so far` : ""}`);
+        const r = await api.kbLearn();
+        if (r.busy) {
+          setLearnMsg("Learning is already running (the scheduled run or another tab) — check back in a few minutes.");
+          break;
+        }
+        learned += r.learned || 0;
+        checked += r.processed || 0;
+        errors += r.errors || 0;
+        setLearnMsg(
+          `Learned ${learned} new case${learned === 1 ? "" : "s"} from ${checked} closed ticket${checked === 1 ? "" : "s"}` +
+            // failed ones are tried again on the next runs
+            (errors ? ` · ${errors} couldn't be read (will retry)` : "") +
+            (r.pending ? ` · ${r.pending} still to check` : "")
+        );
+        if (!r.pending || !((r.learned || 0) + (r.skipped || 0))) break;
+      }
+    } catch (e) {
+      setLearnMsg(null);
+      setErr(`Learn now failed${learned ? ` (after learning ${learned} new case${learned === 1 ? "" : "s"})` : ""}: ${e.message}`);
+    } finally {
+      setLearning(false);
+      load();
+    }
   };
 
   // poll the background job until it finishes, updating the progress message
@@ -145,6 +188,25 @@ export default function KnowledgeBase() {
             ))}
           </div>
 
+          {/* resolved cases learned from closed tickets (cron 3×/day + this button) */}
+          {sources.learning && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginTop: 12, fontSize: 12, color: "var(--ink-soft)" }}>
+              <span title={sources.learning.lastRunAt ? `Last checked ${fmtWhen(sources.learning.lastRunAt)}` : "Not run yet"}>
+                <i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: KB_SOURCES["resolved-ticket"].color, marginRight: 6 }} />
+                Resolved cases · last learned {sources.learning.lastLearnedAt ? fmtWhen(sources.learning.lastLearnedAt) : "not yet"}
+                {" · "}+{sources.learning.addedThisWeek} this week
+                {sources.learning.pending > 0 &&
+                  ` · ${sources.learning.pending} closed ticket${sources.learning.pending === 1 ? "" : "s"} to check`}
+              </span>
+              <button className="btn sm" disabled={learning} onClick={learnNow}>
+                {learning ? "Learning…" : "Learn now"}
+              </button>
+            </div>
+          )}
+          {learnMsg && (
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--green)" }}>{learnMsg}</div>
+          )}
+
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
             <button className="btn sm" disabled={!!ingesting} onClick={() => ingest("web", "Website")}>
               {ingesting === "web" ? "Importing…" : "↻ Import from Website"}
@@ -218,6 +280,12 @@ export default function KnowledgeBase() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <span className="mono" style={{ fontSize: 11, color: "var(--brass)" }}>{a.id}</span>
                 <span className="badge" style={{ background: sm.color, color: "#fff" }}>{sm.label}</span>
+                {/* a learned goodwill/money decision — drafts never treat it as policy */}
+                {(a.tags || []).includes("one-off-exception") && (
+                  <span className="badge" style={{ background: "#fdf0d8", color: "#8a5a00" }} title="A one-off goodwill decision, not standard policy">
+                    Exception
+                  </span>
+                )}
                 {a.finish && (
                   <span className="badge" style={{ background: "var(--line-soft)", color: "var(--ink-soft)" }}>
                     <i className="swatch" style={{ background: FINISHES[a.finish] || "#ccc" }} />
@@ -260,6 +328,10 @@ export default function KnowledgeBase() {
       )}
     </>
   );
+}
+
+function fmtWhen(iso) {
+  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function SourceChip({ label, color, active, onClick }) {

@@ -33,7 +33,7 @@ import { lookupWalmartOrders, extractWalmartNumbers } from "../walmart.js";
 import { isBazaarvoiceAlert, parseAndDraft } from "../bazaarvoice.js";
 import { retrieveRelevant } from "../retrieval.js";
 import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../tickets-sync.js";
-import { recordFeedback } from "../feedback.js";
+import { recordFeedback, recordSend } from "../feedback.js";
 import { sendSurvey } from "../surveys.js";
 import { supabase } from "../supabase.js";
 import { sendZohoFile, sendFileError, fileOptions, rasterImageType } from "../attachment-http.js";
@@ -205,14 +205,15 @@ router.post("/:id/improve", async (req, res) => {
 // POST /api/tickets/:id/send  { to, content, contentType?, feedback? }
 router.post("/:id/send", async (req, res) => {
   try {
-    const { to, cc, content, contentType, feedback, attachmentIds } = req.body;
+    const { to, cc, content, contentType, feedback, attachmentIds, origin } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: "Empty reply" });
     const result = await sendReply(req.params.id, { to, cc, content, contentType, attachmentIds });
     // Feedback loop: record how much the agent changed the AI draft. Best-effort
     // — a failure here must never affect the customer-facing send.
+    let measured = null;
     if (feedback?.aiDraft) {
       try {
-        await recordFeedback({
+        measured = await recordFeedback({
           ticket: { id: req.params.id, number: feedback.ticketNumber },
           aiDraft: feedback.aiDraft,
           sentText: content,
@@ -225,6 +226,16 @@ router.post("/:id/send", async (req, res) => {
         });
       } catch { /* ignore — sending already succeeded */ }
     }
+    // who wrote it, for the KB learner — every send, not only AI drafts
+    try {
+      await recordSend({
+        ticketId: req.params.id,
+        threadId: result?.id,
+        // a draft restored after a reload started from the AI too, unmeasured
+        origin: { ...(origin || {}), ai: Boolean(feedback?.aiDraft || origin?.aiRestored) },
+        editClass: measured?.editClass || null,
+      });
+    } catch { /* ignore — sending already succeeded */ }
     res.json({ sent: true, result });
   } catch (err) {
     res.status(502).json({ error: err.message });

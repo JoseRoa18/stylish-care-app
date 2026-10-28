@@ -16,6 +16,8 @@ import { ingestWixProducts, wixProductsConfigured } from "../sources/wix-product
 import { zohoConfigured } from "../zoho.js";
 import { buildIndex } from "../kb-index.js";
 import { embeddingsConfigured } from "../embeddings.js";
+import { learnPending, learningStatus } from "../resolved-tickets.js";
+import { maybeSync } from "../tickets-sync.js";
 
 const router = Router();
 
@@ -25,8 +27,14 @@ router.get("/", async (_req, res) => {
 
 // counts per source — drives the KB header / dashboard
 router.get("/sources", async (_req, res) => {
+  const [counts, learning] = await Promise.all([
+    sourceCounts(),
+    // the KB tab's "last learned · +N this week" line; never blocks the counts
+    learningStatus().catch(() => null),
+  ]);
   res.json({
-    ...(await sourceCounts()),
+    ...counts,
+    learning,
     connectors: {
       dropbox: dropboxConfigured(),
       zoho: zohoConfigured(),
@@ -53,7 +61,12 @@ router.put("/:id", async (req, res) => {
 });
 
 router.delete("/:id", async (req, res) => {
-  res.json(await deleteArticle(req.params.id));
+  try {
+    res.json(await deleteArticle(req.params.id));
+  } catch (err) {
+    // e.g. a learned case whose "never learn again" mark couldn't be saved
+    res.status(502).json({ error: err.message });
+  }
 });
 
 // ── ingestion ────────────────────────────────────────────────
@@ -113,6 +126,21 @@ async function runJob(keys) {
     job.finishedAt = Date.now();
   }
 }
+
+// POST /api/kb/learn — "Learn now": learn from tickets closed since the last
+// run. Awaited within a budget instead of the background `job` above, which a
+// serverless instance can drop after the response; the tab calls again while
+// `pending` is above zero. The same run happens three times a day by cron.
+router.post("/learn", async (_req, res) => {
+  const t0 = Date.now();
+  try {
+    try { await maybeSync(); } catch { /* learn from what the table already has */ }
+    const r = await learnPending({ budgetMs: Math.max(5000, 45000 - (Date.now() - t0)), trigger: "button" });
+    res.json(r.busy ? { ...r, ...(await learningStatus().catch(() => ({}))) } : r);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // POST /api/kb/reindex — rebuild the embedding index on demand
 router.post("/reindex", async (_req, res) => {

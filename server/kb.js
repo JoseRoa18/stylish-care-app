@@ -6,6 +6,7 @@
 
 import { supabase, toVector } from "./supabase.js";
 import { embedDocuments } from "./embeddings.js";
+import { markLedger, RESOLVED_TICKET_SOURCE } from "./resolved-tickets.js";
 
 export const SOURCES = ["manual", "web", "dropbox", "zoho-template", "youtube", "resolved-ticket", "product"];
 
@@ -92,15 +93,31 @@ export async function updateArticle(id, patch) {
     .from("kb_articles").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
   if (!existing) throw new Error(`Article ${id} not found`);
-  const merged = { ...rowToArticle(existing), ...patch, id, updatedAt: new Date().toISOString() };
+  // A resolved case's date is the day its ticket closed, and retrieval ranks
+  // cases by it — an edit must not make an old case look brand new.
+  const isCase = existing.source === RESOLVED_TICKET_SOURCE;
+  const merged = {
+    ...rowToArticle(existing), ...patch, id,
+    updatedAt: isCase ? existing.updated_at : new Date().toISOString(),
+  };
   const embedding = await embedText(merged.title, merged.body);
   const { error: e2 } = await supabase
     .from("kb_articles").update({ ...toRow(merged), embedding }).eq("id", id);
   if (e2) throw new Error(e2.message);
+  // the learner must not overwrite the team's wording when the ticket re-closes
+  if (isCase && id.startsWith("RT-")) {
+    try { await markLedger(id.slice(3), { editedByTeam: true }); } catch { /* the edit itself is saved */ }
+  }
   return merged;
 }
 
 export async function deleteArticle(id) {
+  // A learned case the team deletes must never be learned again: record that
+  // FIRST, so a failed write leaves the entry in place rather than deleted but
+  // free to come back on the next run.
+  if (String(id).startsWith("RT-")) {
+    await markLedger(id.slice(3), { outcome: "deleted", articleId: null, deletedAt: new Date().toISOString() });
+  }
   const { error, count } = await supabase
     .from("kb_articles").delete({ count: "exact" }).eq("id", id);
   if (error) throw new Error(error.message);
