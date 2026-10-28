@@ -37,13 +37,36 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 input, textarea, select { font-family: inherit; font-size: 14px; }
 
 /* ── shell ─────────────────────────────────────────────── */
-.shell { max-width: 1380px; margin: 0 auto; padding: 0 28px 80px; }
+/* Fluid on every tab (one width, so the sticky topbar never jumps when you
+   switch tabs). The old 1380px cap left a third of a 1920 screen empty while
+   the email was squeezed; 2400px only centres the app on ultrawides. */
+.shell { max-width: 2400px; margin: 0 auto; padding: 0 clamp(16px, 2vw, 32px) 80px; }
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 22px 0 18px; border-bottom: 1px solid var(--line);
   position: sticky; top: 0; background: var(--paper); z-index: 10;
 }
+/* Narrow windows and phones: the connector row alone is ~700px wide, so let
+   the header rows wrap instead of scrolling the whole page sideways. */
+@media (max-width: 1150px) {
+  .topbar { flex-wrap: wrap; row-gap: 10px; }
+  .status-row { flex-wrap: wrap; row-gap: 4px; }
+}
+@media (max-width: 640px) {
+  .tabs { flex-wrap: wrap; }
+  .section-title { flex-wrap: wrap; gap: 10px; }
+  .section-title > :last-child { flex-wrap: wrap; }
+  /* wrapped, the topbar is ~270px tall: stuck, it would hide a third of a
+     phone screen, so it scrolls away (and the bars under it stick to the top;
+     !important beats the height App.jsx sets inline) */
+  .topbar { position: static; }
+  :root { --topbar-h: 0px !important; }
+}
+/* two-column grids (Dashboard, Calls) stack on phones instead of pushing
+   the page sideways */
+.grid-2 { display: grid; grid-template-columns: var(--cols, 1fr 1fr); }
+@media (max-width: 700px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
 .brand { display: flex; align-items: baseline; gap: 12px; }
 /* the drop sits on the wordmark's baseline rather than the text box's */
 .brand-mark { align-self: center; display: block; flex-shrink: 0; margin-right: -2px; }
@@ -104,16 +127,24 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .ticket-head .pick { margin: 3px 2px 0 0; width: 15px; height: 15px; accent-color: var(--brass); cursor: pointer; flex-shrink: 0; }
 
-.ticket { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.ticket { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 14px; box-shadow: var(--shadow); overflow: hidden; container-type: inline-size; }
 .ticket.sent { border-color: var(--green); }
 .ticket-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 18px; gap: 16px; cursor: pointer; }
 .ticket-head:hover { background: #fffef9; }
 .ticket-subj { font-weight: 600; font-size: 14px; }
 .ticket-meta { color: var(--ink-faint); font-size: 12px; margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
 .ticket-body { padding: 0 18px 18px; border-top: 1px solid var(--line-soft); }
+/* a narrow ticket (phone, half-screen window): the header's actions wrap under
+   the subject. The ticket no longer grows to fit them, so they'd be cut off. */
+@container (max-width: 640px) {
+  .ticket-head { flex-wrap: wrap; }
+  .ticket-head > div:last-child { flex-wrap: wrap; max-width: 100%; }
+}
 
 .convo { background: var(--paper); border-radius: 10px; padding: 14px; margin: 10px 0 14px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-.msg { font-size: 13.5px; max-width: 94%; padding: 11px 14px; border-radius: 12px; background: #fff; border: 1px solid var(--line-soft); }
+/* bubbles grow with the screen, capped at ~150 characters a line so a big
+   monitor still reads comfortably */
+.msg { font-size: 13.5px; max-width: min(94%, 1100px); padding: 11px 14px; border-radius: 12px; background: #fff; border: 1px solid var(--line-soft); }
 .msg.in { align-self: flex-start; border-bottom-left-radius: 3px; }
 .msg.out { align-self: flex-end; background: #fbf7ee; border-color: #ece2c9; border-bottom-right-radius: 3px; }
 .msg .who { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); margin-bottom: 5px; }
@@ -194,7 +225,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .rich-editor ul, .rich-editor ol { margin: 6px 0 6px 22px; }
 
 /* ── email HTML rendering (#9) ───────────────────────────── */
-.email-html { font-size: 13.5px; line-height: 1.55; overflow-x: auto; word-break: break-word; white-space: normal; }
+/* contain: paint — an email's position:fixed box stays inside its bubble
+   instead of covering the app (a fake "sign in again" over the inbox) */
+.email-html { font-size: 13.5px; line-height: 1.55; overflow-x: auto; word-break: break-word; white-space: normal; contain: paint; }
 .email-html p { margin: 0 0 8px; }
 .email-html img { max-width: 100%; height: auto; }
 .email-html table { max-width: 100%; border-collapse: collapse; }
@@ -202,12 +235,19 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .email-html a { color: var(--brass); }
 .email-html ul, .email-html ol { margin: 6px 0 6px 22px; }
 .email-html blockquote { margin: 8px 0 8px 4px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--ink-faint); }
-.email-html.hide-quotes blockquote,
-.email-html.hide-quotes .gmail_quote,
-.email-html.hide-quotes .zmail_extra { display: none; }
 .quote-toggle { margin-top: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 11px; color: var(--ink-faint); cursor: pointer; }
 .quote-toggle:hover { background: var(--line-soft); }
 .email-html img { cursor: zoom-in; }
+/* quoted parts tagged by sanitize.js — Zoho prefixes Gmail's classes
+   (x_123gmail_quote) and Outlook's chain has no wrapper at all. The only
+   rule, so the view and the translator agree on what is quoted; !important
+   beats the emails' own inline display (Outlook's inline-block <hr>). */
+.email-html.hide-quotes .sc-quoted { display: none !important; }
+/* translated view: per-message status under a bubble */
+.xl-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--ink-faint); margin-top: 6px; }
+.xl-note.err { color: #c0392b; }
+.xl-note button { border: 0; background: none; padding: 0; color: var(--brass); text-decoration: underline; cursor: pointer; font: inherit; }
+.xl-note .spin { width: 10px; height: 10px; border-width: 1.5px; }
 
 /* ── in-app image lightbox ───────────────────────────────── */
 .lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(22, 19, 14, 0.86); display: flex; align-items: center; justify-content: center; padding: 28px; cursor: zoom-out; }
@@ -215,10 +255,54 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .lightbox-close { position: fixed; top: 16px; right: 20px; width: 36px; height: 36px; border-radius: 999px; border: none; background: rgba(255,255,255,.92); color: #222; font-size: 16px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
 .lightbox-close:hover { background: #fff; }
 
+/* ── in-app file viewer (FileViewer.jsx) ─────────────────── */
+/* One modal for every attachment kind, on the lightbox's dark backdrop (the
+   .lightbox rules above stay: the Settings and New ticket modals use them).
+   Customer HTML only ever renders inside the sandboxed .viewer-frame. */
+.viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(22, 19, 14, 0.86); display: flex; flex-direction: column; }
+.viewer-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; color: #f6f3ec; }
+.viewer-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.viewer-title b { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-title span { font-size: 11.5px; color: rgba(246, 243, 236, 0.65); }
+.viewer-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border: none; border-radius: 999px; background: rgba(255,255,255,.92); color: #222; font-size: 12.5px; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.viewer-btn:hover { background: #fff; }
+.viewer-close { width: 34px; height: 34px; justify-content: center; padding: 0; font-size: 15px; }
+.viewer-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 12px 14px; cursor: zoom-out; }
+.viewer-stage { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 100%; max-height: 100%; cursor: default; }
+.viewer-nav { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 999px; background: rgba(255,255,255,.85); color: #222; font-size: 24px; line-height: 1; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.viewer-nav:hover { background: #fff; }
+.viewer-media { display: block; max-width: min(94vw, 1600px); max-height: calc(100vh - 90px); border-radius: 10px; box-shadow: 0 12px 48px rgba(0,0,0,.55); background: #000; }
+img.viewer-media { background: #fff; }
+.viewer-frame { display: block; width: min(1100px, 92vw); height: calc(100vh - 90px); border: 0; border-radius: 10px; background: #fff; }
+.viewer-doc { width: min(1100px, 92vw); height: calc(100vh - 90px); display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: var(--card); }
+.viewer-doc .viewer-frame { width: 100%; height: auto; flex: 1; min-height: 0; border-radius: 0; }
+.viewer-head { padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-soft); }
+.viewer-note { padding: 7px 14px; font-size: 12px; color: var(--amber); background: var(--amber-soft); }
+.viewer-text { width: min(1100px, 92vw); max-height: calc(100vh - 90px); overflow: auto; margin: 0; padding: 16px 18px; border-radius: 10px; background: #fff; color: var(--ink); font: 12.5px/1.55 "IBM Plex Mono", monospace; white-space: pre-wrap; word-break: break-word; }
+.viewer-text-fill { width: auto; max-height: none; flex: 1; min-height: 0; border-radius: 0; }
+.viewer-card { max-width: 440px; padding: 26px 30px; border-radius: 14px; background: var(--card); text-align: center; box-shadow: 0 12px 48px rgba(0,0,0,.4); }
+.viewer-progress { width: 260px; max-width: 100%; height: 6px; margin: 12px auto 4px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.viewer-progress > div { height: 100%; background: var(--brass); transition: width .15s; }
+.viewer-table-wrap { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+.viewer-table { border-collapse: collapse; font-size: 12.5px; }
+.viewer-table th, .viewer-table td { max-width: 360px; padding: 3px 8px; border: 1px solid var(--line-soft); text-align: left; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer-table thead th { position: sticky; top: 0; background: var(--paper); font-weight: 600; color: var(--ink-faint); }
+.viewer-table .rn { background: var(--paper); color: var(--ink-faint); text-align: right; }
+.viewer-tabs { display: flex; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--line); background: var(--paper); overflow-x: auto; }
+.viewer-tabs button { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.viewer-tabs button.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.viewer-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fffef9; font-size: 12px; color: var(--ink); }
+.viewer-chip:hover { border-color: var(--ink-faint); }
+.viewer-chip span { color: var(--ink-faint); font-size: 11px; }
+/* Apple Mail Drop card — in the viewer and inside the message bubble */
+.viewer-maildrop { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #c9d8ea; border-radius: 10px; background: #eef4fb; font-size: 12.5px; color: var(--ink-soft); }
+
 /* ── Ticket Peek (split view) ────────────────────────────── */
 .peek { display: flex; gap: 14px; align-items: flex-start; }
-.peek-list { flex: 0 0 340px; max-height: calc(100vh - 230px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-.peek-detail { flex: 1; min-width: 0; position: sticky; top: 12px; }
+/* the list gives width back on laptops, where the email needs it most */
+.peek-list { flex: 0 0 clamp(280px, 18vw, 360px); max-height: calc(100vh - 230px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+/* sticks below the sticky topbar, not underneath it */
+.peek-detail { flex: 1; min-width: 0; position: sticky; top: calc(var(--topbar-h, 118px) + 8px); }
 .peek-detail .ticket { margin: 0; }
 .peek-row { padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; transition: border-color .12s; }
 .peek-row:hover { border-color: var(--ink-faint); }
@@ -226,17 +310,46 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .peek-subj { font-weight: 600; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .peek-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 11.5px; color: var(--ink-faint); }
 .peek-cust { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 920px) { .peek { flex-direction: column; } .peek-list { flex-basis: auto; width: 100%; max-height: 320px; } .peek-detail { position: static; } }
+/* stacked: the detail takes the full width. Sized by its content instead, it
+   collapses (the ticket is a size container now, see .ticket) — and before
+   that, a 640px email widened it and scrolled the whole page sideways. */
+@media (max-width: 920px) { .peek { flex-direction: column; } .peek-list { flex-basis: auto; width: 100%; max-height: 320px; } .peek-detail { position: static; width: 100%; } }
 
 /* ── ticket detail: main + right context sidebar ─────────── */
 .ticket-cols { display: flex; gap: 18px; align-items: flex-start; }
 .ticket-main { flex: 1 1 0; min-width: 0; }
 .ticket-side { flex: 0 0 300px; min-width: 0; margin-top: 14px; padding-left: 16px; border-left: 1px solid var(--line-soft); }
 .ticket-side .card { padding: 10px 12px; }
+/* Stacked, the main column must STRETCH: sized to its content it was narrow on
+   short tickets, and a wide email pushed it past .ticket { overflow: hidden },
+   which cut the bubbles and the composer off. Stretched, wide emails scroll
+   inside their own bubble (.email-html overflow-x). */
 @media (max-width: 1100px) {
-  .ticket-cols { flex-direction: column; }
+  /* fallback for browsers without container queries */
+  .ticket-cols { flex-direction: column; align-items: stretch; }
   .ticket-side { flex-basis: auto; width: 100%; border-left: none; padding-left: 0; margin-top: 4px; }
 }
+/* The ticket picks its columns from the width IT gets, not the window's: in
+   Peek the detail is ~300-400px narrower than the window, so on a laptop the
+   300px panel left the email ~400-500px. Below 1200px of ticket body the panel
+   moves under the reply box (laptops in Peek, 1920 laptops at 125% = 1536 too);
+   above it (big monitors, ~1610px windows and up) it stays on the right and the
+   main column keeps ~770px or more. */
+.ticket-body { container-type: inline-size; }
+@container (max-width: 1200px) {
+  .ticket-cols { flex-direction: column; align-items: stretch; }
+  /* under the reply box the panel's blocks sit side by side (each as wide as
+     the old sidebar) so it stays short */
+  .ticket-side {
+    flex-basis: auto; width: 100%; border-left: none; padding-left: 0; margin-top: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); column-gap: 16px; align-items: start;
+  }
+}
+/* "Hide panel": hidden with CSS, not unmounted, so its lookups survive */
+.ticket-cols.side-closed .ticket-side { display: none; }
+/* the Hide/Show panel button sits right after the Original/EN/ES switch */
+.convo-bar { flex-wrap: wrap; }
+.convo-bar > .seg { margin-left: auto; }
 
 /* internal note bubble in the conversation */
 .msg.note-msg { align-self: stretch; max-width: 100%; background: var(--amber-soft); border-color: #e4d5ab; }

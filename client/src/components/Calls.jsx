@@ -52,7 +52,7 @@ export default function Calls({ onOpenInbox }) {
       {!data ? (
         <div className="empty"><span className="spin" /> Loading calls…</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, alignItems: "start" }}>
+        <div className="grid-2" style={{ "--cols": "1.4fr 1fr", gap: 16, alignItems: "start" }}>
           {/* Inbound calls */}
           <div className="card">
             <div className="chart-title">Inbound calls ({calls.length})</div>

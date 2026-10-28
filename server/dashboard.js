@@ -167,10 +167,17 @@ function aggregate(rows, period, custom, includeNotifications) {
   const { from, to, days } = windowOf(period, custom);
   const { all, window } = load(rows, { from, to, includeNotifications });
 
-  const openRows = all.filter(
-    (r) => isOpenType(r.status) && (includeNotifications || r.category !== "notification")
-  );
+  // The open count is the one exception to the notification filter. It is
+  // Zoho's "Open Cases" (every Open/Escalated row, any period), the same rule
+  // as the Inbox "Open" chip, Best Buy threads included. Filtering it made the
+  // card disagree with Zoho, and drift as the categoriser labelled new tickets;
+  // the automated ones are counted instead, so the card can say so.
+  const openRows = all.filter((r) => isOpenType(r.status));
+  const onHoldRows = all.filter((r) => !isOpenType(r.status) && !isClosed(r.status));
+  // waiting time is about customers: a back-in-stock alert left open for a
+  // week would otherwise set "oldest wait"
   const waits = openRows
+    .filter((r) => includeNotifications || r.category !== "notification")
     .map((r) => (r.customer_response_time ? Date.now() - new Date(r.customer_response_time).getTime() : null))
     .filter((ms) => ms != null && ms >= 0);
 
@@ -188,6 +195,9 @@ function aggregate(rows, period, custom, includeNotifications) {
     windowDays: days,
     total: window.length,
     openNow: openRows.length,
+    openAutomated: openRows.filter((r) => r.category === "notification").length,
+    openBestBuy: openRows.filter((r) => String(r.id).startsWith("bb:")).length,
+    onHold: onHoldRows.length, // Awaiting Response and the other pending statuses
     closed: window.filter((r) => isClosed(r.status)).length,
     // how much of the window was automated mail — shown so the filter is honest
     // about what it is hiding rather than quietly shrinking every number

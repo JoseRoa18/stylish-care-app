@@ -14,10 +14,18 @@ async function req(path, options) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && data.authRequired && _onAuthExpired) _onAuthExpired();
-    throw new Error(data.error || `Request failed (${res.status})`);
+    if (res.status === 401 && data.authRequired) authExpired();
+    // .status lets a caller tell a rate limit (429) from a real failure;
+    // .code says more when the server gives one (MAX_TOKENS)
+    throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status, code: data.code });
   }
   return data;
+}
+
+// Back to the login screen — also for requests made outside req() (the file
+// viewer streams attachments with its own fetch).
+export function authExpired() {
+  _onAuthExpired?.();
 }
 
 export const api = {
@@ -57,6 +65,10 @@ export const api = {
     `/api/tickets/${id}/attachments/${attId}/download?name=${encodeURIComponent(name || "file")}`,
   threadAttachmentUrl: (id, threadId, attId, name) =>
     `/api/tickets/${id}/threads/${threadId}/attachments/${attId}/download?name=${encodeURIComponent(name || "file")}`,
+  // Only the attachment proxy URLs above (and noteAttachmentUrl) understand
+  // ?dl=1 (Content-Disposition: attachment) — not inline-image or remote URLs.
+  isAttachmentUrl: (url) => /^\/api\/tickets\/[^?#]+\/download\?/.test(url || ""),
+  dl: (url) => `${url}&dl=1`,
   uploadAttachment: async (id, file) => {
     const res = await fetch(
       `/api/tickets/${id}/attachments?name=${encodeURIComponent(file.name)}`,
@@ -116,8 +128,6 @@ export const api = {
   saveSettings: (patch) => req(`/tickets/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   improveDraft: (id, draft) =>
     req(`/tickets/${id}/improve`, { method: "POST", body: JSON.stringify({ draft }) }),
-  translateDraft: (html, target) =>
-    req(`/translate/html`, { method: "POST", body: JSON.stringify({ html, target }) }),
   setStatus: (id, status) =>
     req(`/tickets/${id}/status`, {
       method: "POST",
@@ -146,8 +156,10 @@ export const api = {
     req(key ? `/kb/ingest/${key}` : "/kb/ingest", { method: "POST" }),
   kbIngestStatus: () => req("/kb/ingest/status"),
   manuals: () => req("/dropbox/manuals"),
-  translate: (texts, target) =>
-    req("/translate", { method: "POST", body: JSON.stringify({ texts, target }) }),
+  // segments: [{ id, t }] text fragments of one email (see translateHtml.js);
+  // target: "English" | "Spanish" | "French" → { translations: { [id]: t } }
+  translateSegments: (segments, target) =>
+    req("/translate/segments", { method: "POST", body: JSON.stringify({ segments, target }) }),
 };
 
 // KB source → badge color/label

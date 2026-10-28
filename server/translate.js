@@ -1,13 +1,119 @@
 // server/translate.js
-// Translate a batch of texts (e.g. the messages of a ticket) into a target
-// language using Gemini. Used so an agent can read a foreign-language ticket
-// in English or Spanish. Returns the translations in the same order.
+// Translate emails with Gemini so an agent can read a foreign-language ticket
+// in English or Spanish, and send a reply in the customer's language.
+// translateSegments is the one the app uses: the client sends the email's
+// text in segments (formatting as numbered placeholders) and rebuilds the
+// HTML itself, so the model never writes markup.
 
 const { GEMINI_API_KEY } = process.env;
 const MODEL = process.env.GEMINI_TRANSLATE_MODEL || "gemini-2.5-flash";
 
+export const TRANSLATE_TARGETS = new Set(["English", "Spanish", "French"]);
+
 function thinkingFor(model) {
   return /^gemini-3/.test(model) ? { thinkingLevel: "low" } : { thinkingBudget: 0 };
+}
+
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+const LANG_CODE = { English: "en", Spanish: "es", French: "fr" };
+const PLACEHOLDER = /<\/?g\d+>|<i\d+\s*\/>|<br\s*\/?>/gi;
+const norm = (s) => s.replace(/\s+/g, " ").trim();
+const wordCount = (s) => (s.replace(PLACEHOLDER, " ").match(/\p{L}{2,}/gu) || []).length;
+
+// Output budget from the input: a translation is about as long as its source,
+// so twice the input's tokens is plenty. A model that loops (on filler it
+// echoes back) then stops in a few seconds instead of running to 8192 tokens
+// (~30 s, holding one of the client's request slots all that time).
+function outputBudget(items) {
+  const s = JSON.stringify(items);
+  const ascii = s.replace(/[^\x00-\x7f]/g, "").length;
+  const tokens = ascii / 3 + (s.length - ascii); // worse than 3 chars a token outside ASCII
+  return Math.min(8192, Math.ceil(512 + 2 * tokens + 16 * items.length));
+}
+
+async function askGemini(items, target, { alone = false } = {}) {
+  const code = LANG_CODE[target];
+  const context = alone
+    ? `Each item is a separate text: translate each one on its own.`
+    : `The items are consecutive fragments of ONE email, in reading order — use them as context for each other. Fragments can be in different languages (for example an English form or chat template with the customer's own words in French): every fragment that is not written in ${target} must be translated — form answers, chat messages and the customer's own words included. Only a fragment already written in ${target} stays unchanged.`;
+  const prompt = `Translate the text of each item into ${target}. ${context} Each item has an "id" and a text "t". Return a JSON array with exactly one {"id","t","lang"} object per input id, where "lang" is the ISO 639-1 code of the language the item is written in ("${code}" when it is already in ${target}, or holds nothing to translate: only names, codes, numbers or addresses). Markup rules — <gN>…</gN> wraps formatted text (bold, link, colour…). Keep every pair, with the same N, around the translated words it belongs to; you may move it to fit the grammar. Never invent new N values. <iN/> is an image and <br/> a line break; keep each one, in the matching position. Do not add any other markup, quotes, notes or explanations. &lt; and &amp; are literal characters of the text; keep them as written. Keep URLs, email addresses, phone numbers, model numbers, order numbers, promo codes and people's names exactly as written.
+
+${JSON.stringify(items)}`;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: outputBudget(items),
+          temperature: 0,
+          thinkingConfig: thinkingFor(MODEL),
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { id: { type: "integer" }, t: { type: "string" }, lang: { type: "string" } },
+              required: ["id", "t", "lang"],
+            },
+          },
+        },
+      }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw httpError(res.status, `Gemini translate error (${res.status}): ${data?.error?.message || "unknown"}`);
+  const cand = data?.candidates?.[0];
+  // MAX_TOKENS / SAFETY / RECITATION → a cut or empty answer, not a translation.
+  // .code MAX_TOKENS tells the client to split the request and try again.
+  if (cand?.finishReason !== "STOP") {
+    const why = cand?.finishReason || data?.promptFeedback?.blockReason || "no answer";
+    throw Object.assign(httpError(502, `Translation stopped early (${why})`), { code: why === "MAX_TOKENS" ? why : undefined });
+  }
+  const arr = salvageArray((cand.content?.parts || []).map((p) => p.text || "").join(""));
+  if (!Array.isArray(arr)) throw httpError(502, "Translation came back unreadable");
+  const wanted = new Set(items.map((it) => it.id));
+  const out = {};
+  for (const x of arr) {
+    if (x && wanted.has(x.id) && typeof x.t === "string")
+      out[x.id] = { t: x.t, lang: String(x.lang || "").slice(0, 2).toLowerCase() };
+  }
+  return out;
+}
+
+// items: [{ id, t }] — consecutive fragments of ONE email, in reading order.
+// Returns { [id]: translated t } for the ids that came back. Throws (with
+// .status; Gemini's 429 is kept so the client can back off) instead of
+// quietly returning the originals as if they were a translation.
+export async function translateSegments(items, target) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set in .env");
+  if (!TRANSLATE_TARGETS.has(target)) throw httpError(400, `Unsupported target language: ${target}`);
+  const code = LANG_CODE[target];
+  const got = await askGemini(items, target);
+  // In a mixed email (an English form around the customer's French words) the
+  // model can hand a fragment back untranslated. Those (a few words or more,
+  // unchanged, in another language) are asked again on their own; one still
+  // unchanged is left out, so the client shows "Partly translated · Retry"
+  // instead of passing the original off as a translation.
+  const missed = items.filter(({ id, t }) => {
+    const g = got[id];
+    return g && g.lang && g.lang !== code && norm(g.t) === norm(t) && wordCount(t) >= 2;
+  });
+  if (missed.length) {
+    const again = await askGemini(missed, target, { alone: true }).catch(() => ({}));
+    for (const { id, t } of missed) {
+      const g = again[id];
+      if (g && norm(g.t) !== norm(t)) got[id] = g;
+      else if (!(g && g.lang === code)) delete got[id];
+    }
+  }
+  const out = {};
+  for (const [id, g] of Object.entries(got)) out[id] = g.t;
+  return out;
 }
 
 // Cap each message so a giant quoted/spam chain can't blow past the output
@@ -33,6 +139,9 @@ function salvageArray(text) {
   return null;
 }
 
+// DEPRECATED — the draft translator now uses translateSegments. Kept for one
+// deploy so tabs still running the old bundle keep working; then delete it
+// with POST /api/translate/html.
 // Translate the VISIBLE text of an HTML email into `target`, keeping the tags
 // and structure intact. Used to translate a drafted reply before sending.
 export async function translateHtml(html, target = "Spanish") {
@@ -64,6 +173,9 @@ ${src.slice(0, 9000)}`;
   return out.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim() || src;
 }
 
+// DEPRECATED — the conversation view now uses translateSegments. Kept for one
+// deploy so tabs still running the old bundle keep working; then delete it
+// with POST /api/translate.
 export async function translateTexts(texts, target = "English") {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set in .env");
   const full = (texts || []).map((t) => String(t ?? ""));

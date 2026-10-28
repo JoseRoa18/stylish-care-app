@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FileViewer, { openViewer, fileKind, KIND_ICON, MailDropPeek } from "./FileViewer.jsx";
 import { api } from "../api.js";
+import { sanitizeEmailHtml } from "../sanitize.js";
+import { translateHtmlSegments, translateMessage } from "../translateHtml.js";
 
 // "view" values map to server-side filters. "all"/"active"/"closed" are
 // computed; everything else is matched as an exact Zoho status. Built dynamically
@@ -51,6 +54,16 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
   const [source, setSource] = useState("all"); // origin filter (Wayfair, RONA…)
   const [layout, setLayout] = useState(() => localStorage.getItem("inboxLayout") || "split");
   useEffect(() => { localStorage.setItem("inboxLayout", layout); }, [layout]);
+  // customer panel (orders/shipping/phone) beside each ticket: hideable so the
+  // email gets the width. Kept here, not in TicketRow — List mounts every row
+  // once, so a per-row copy went stale when you opened the next ticket.
+  const [sideOpen, setSideOpen] = useState(() => {
+    try { return localStorage.getItem("ticketSide") !== "hidden"; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("ticketSide", sideOpen ? "shown" : "hidden"); } catch { /* ignore */ }
+  }, [sideOpen]);
+  const toggleSide = useCallback(() => setSideOpen((v) => !v), []);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
@@ -68,13 +81,27 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
   // reset to page 1 whenever the filter, sort or search changes
   useEffect(() => { setPage(1); }, [view, sort, debounced]);
 
+  // Bumped on every local count change (see moveCount), so a reload that was
+  // already in flight can't put back counts from before the change.
+  const countEdits = useRef(0);
+  // Status saves still in flight. The server updates its counts before it
+  // answers, so a reload landing meanwhile may already hold the change and
+  // moveCount would then count it twice: counts are left alone until then.
+  const statusPending = useRef(0);
+  const statusStart = useCallback(() => { statusPending.current++; }, []);
+  const statusFailed = useCallback(() => { statusPending.current = Math.max(0, statusPending.current - 1); }, []);
+  // The ticket in the Peek pane stays there while its Undo is up, even once a
+  // poll no longer lists it (just closed, in the Open view): { ticket, until }
+  const kept = useRef(null);
+
   const load = useCallback(async () => {
     setLoading(true);
+    const edits = countEdits.current;
     try {
       const data = await api.inbox({ view, q: debounced, page, pageSize, sort });
       setConfigured(data.configured);
       setTickets(data.tickets || []);
-      setCounts(data.counts || { byStatus: {} });
+      if (edits === countEdits.current && !statusPending.current) setCounts(data.counts || { byStatus: {} });
       setTotal(data.total || 0);
       setFetchedAt(data.fetchedAt);
       setErr(data.error || null);
@@ -92,6 +119,32 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
   }, [load]);
+
+  // A status change made in a ticket moves it from one chip to another. Move
+  // it here rather than reloading: a reload drops a just-closed ticket from the
+  // Open list, which shuts the peek pane and its Undo. The next poll brings
+  // the server's numbers back anyway.
+  const moveCount = useCallback((from, to, ticket) => {
+    statusFailed(); // this save is done
+    if (!from || !to || from === to) return;
+    countEdits.current++;
+    const closedType = (s) => (/closed/i.test(s) ? 1 : 0); // as the server counts it
+    setCounts((c) => {
+      const byStatus = { ...(c.byStatus || {}) };
+      byStatus[from] = Math.max(0, (byStatus[from] || 0) - 1);
+      byStatus[to] = (byStatus[to] || 0) + 1;
+      const shift = closedType(to) - closedType(from); // +1 closing, -1 reopening
+      return { ...c, byStatus, closed: (c.closed || 0) + shift, active: Math.max(0, (c.active || 0) - shift) };
+    });
+    // the "14 tickets · open" line follows the chip (the row itself stays)
+    const inView = (s) =>
+      view === "all" ? 1 : view === "open" ? +OPEN_TYPE_RE.test(s) : view === "active" ? 1 - closedType(s) : +(s === view);
+    const d = inView(to) - inView(from);
+    if (d) setTotal((t) => Math.max(0, t + d));
+    if (ticket) kept.current = { ticket, until: Date.now() + 10000 };
+  }, [view, statusFailed]);
+  // spam / trash / merge: the ticket really is gone from the list
+  const reload = useCallback(() => { kept.current = null; load(); }, [load]);
 
   if (!configured)
     return (
@@ -231,17 +284,24 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
           </div>
           <div className="peek-detail">
             {(() => {
-              const sel = tickets.find((t) => t.id === openId);
+              const k = kept.current;
+              const sel = tickets.find((t) => t.id === openId) ||
+                (k?.ticket.id === openId && Date.now() < k.until ? k.ticket : null);
               return sel ? (
                 <AnyTicketRow
                   key={sel.id}
+                  sideOpen={sideOpen}
+                  onToggleSide={toggleSide}
                   ticket={sel}
                   statusOptions={statusOptions}
                   signature={signature}
                   open
                   peek
                   onToggle={() => {}}
-                  onChanged={load}
+                  onChanged={reload}
+                  onStatusStart={statusStart}
+                  onStatusChanged={moveCount}
+                  onStatusFailed={statusFailed}
                 />
               ) : (
                 <div className="empty" style={{ marginTop: 40 }}>← Select a ticket to view it</div>
@@ -256,17 +316,22 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
             tickets={shown}
             onClear={() => setPicked(new Set())}
             onPickAll={(ids) => setPicked(new Set(ids))}
-            onDone={() => { setPicked(new Set()); load(); }}
+            onDone={(keep = []) => { setPicked(new Set(keep)); load(); }}
           />
           {shown.map((t) => (
             <AnyTicketRow
               key={t.id}
+              sideOpen={sideOpen}
+              onToggleSide={toggleSide}
               ticket={t}
               statusOptions={statusOptions}
               signature={signature}
               open={openId === t.id}
               onToggle={() => setOpenId(openId === t.id ? null : t.id)}
-              onChanged={load}
+              onChanged={reload}
+              onStatusStart={statusStart}
+              onStatusChanged={moveCount}
+              onStatusFailed={statusFailed}
               selected={picked.has(t.id)}
               onSelect={(id, on) =>
                 setPicked((prev) => {
@@ -280,7 +345,7 @@ export default function Inbox({ signature = "", initialSearch = "" }) {
         </>
       )}
 
-      <Lightbox />
+      <FileViewer />
 
       {newOpen && (
         <NewTicketModal
@@ -360,8 +425,11 @@ function WaitTimer({ since, status }) {
   );
 }
 
+// Quotes too: the result also goes inside href="…" (plainToHtml)
 function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 // Drop <img> tags whose src isn't a real web URL (broken blob:/data:/cid: from a
 // pasted screenshot) so we never send a broken image to the customer.
@@ -372,16 +440,32 @@ function stripBrokenImgs(html) {
   });
 }
 // AI draft is plain text → HTML for the rich editor (links + line breaks).
+// A URL stops at a quote: that is punctuation around it, not part of it.
 function plainToHtml(text) {
   return escapeHtml(text)
-    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>')
+    .replace(/(https?:\/\/(?:(?!&quot;|&#39;)[^\s<])+)/g, '<a href="$1">$1</a>')
     .replace(/\n/g, "<br>");
 }
-// The model now returns formatted HTML; use it as-is. Fall back to plainToHtml
-// only if it looks like plain text (no HTML tags).
+// The model now returns formatted HTML; use it (sanitized — it goes straight
+// into the editor and out to the customer). Fall back to plainToHtml only if
+// it looks like plain text: a reply made only of <div>s (what the editor
+// itself produces) is HTML too, not text to escape into literal tags.
 function draftToHtml(draft) {
   const d = draft || "";
-  return /<(p|ul|ol|li|strong|em|a|br|b|i)\b[^>]*>/i.test(d) ? d : plainToHtml(d);
+  return /<(p|div|span|font|ul|ol|li|strong|em|a|br|b|i|u|h[1-6]|table|blockquote|img)\b[^>]*>/i.test(d)
+    ? sanitizeEmailHtml(d, { display: false })
+    : plainToHtml(d);
+}
+
+// Conversation + internal notes interleaved chronologically. Unless "Show
+// earlier" was clicked only the last 4 items are shown (and translated).
+function buildTimeline(conversation, notes, showAll) {
+  const all = [
+    ...(conversation || []).map((m) => ({ kind: "msg", m, t: m.createdTime || "" })),
+    ...(notes || []).map((n) => ({ kind: "note", n, t: n.createdTime || "" })),
+  ].sort((a, b) => (a.t > b.t ? 1 : -1));
+  const hidden = !showAll && all.length > 4 ? all.length - 4 : 0;
+  return { hidden, items: all.slice(hidden) };
 }
 
 // Minimal rich-text editor (contentEditable + execCommand). Uncontrolled: the
@@ -389,8 +473,14 @@ function draftToHtml(draft) {
 // never resets the cursor. Parent reads the html via onChange.
 function RichEditor({ docKey, initialHtml, disabled, onChange, onImagePaste }) {
   const ref = useRef(null);
+  // The one way HTML gets into the editor (AI draft, forward, template,
+  // signature, restored draft), so it is sanitized here: a forwarded email or
+  // a model answer must never run in the app. The parent then holds what is
+  // shown, which is what gets sent.
   useEffect(() => {
-    if (ref.current) ref.current.innerHTML = initialHtml || "";
+    if (!ref.current) return;
+    ref.current.innerHTML = sanitizeEmailHtml(initialHtml || "", { display: false });
+    if (ref.current.innerHTML !== (initialHtml || "")) onChange?.(ref.current.innerHTML);
   }, [docKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exec = (cmd, val) => {
@@ -429,11 +519,7 @@ function RichEditor({ docKey, initialHtml, disabled, onChange, onImagePaste }) {
     const text = e.clipboardData?.getData("text/plain");
     if (html || !text || !/https?:\/\/\S/.test(text)) return; // let rich paste through
     e.preventDefault();
-    const safe = text
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>')
-      .replace(/\n/g, "<br>");
-    document.execCommand("insertHTML", false, safe);
+    document.execCommand("insertHTML", false, plainToHtml(text));
     onChange?.(ref.current?.innerHTML || "");
   };
 
@@ -778,7 +864,9 @@ function BulkBar({ ids, tickets, onClear, onPickAll, onDone }) {
     }
     setBusy(false);
     if (bad.length) setNote(`${bad.length} could not be closed`);
-    else onDone();
+    // reload even after a partial failure, or the closed ones linger in the
+    // list and the chips; the failures stay selected so the note still shows
+    onDone(bad);
   };
 
   const mergeAll = async () => {
@@ -833,17 +921,18 @@ function AnyTicketRow(props) {
     : <TicketRow {...props} />;
 }
 
-function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, signature = "", peek = false, selected = false, onSelect = null }) {
+function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, onStatusStart, onStatusChanged, onStatusFailed, signature = "", peek = false, selected = false, onSelect = null, sideOpen = true, onToggleSide = null }) {
   const [conversation, setConversation] = useState(null);
   const [convoLoading, setConvoLoading] = useState(false);
   const [convoError, setConvoError] = useState(null);
   const [convoLoaded, setConvoLoaded] = useState(false);
 
-  // conversation translation
+  // conversation translation, per message and keyed by message id (never by
+  // position, so a reload after send/merge/draft can't shift translations
+  // onto the wrong bubble): xl["<msgId>|<lang>"] = {pending} | {html, partial} | {error}
   const [view, setView] = useState("orig");
-  const [xcache, setXcache] = useState({});
-  const [xlating, setXlating] = useState(false);
-  const [xError, setXError] = useState(null);
+  const [xl, setXl] = useState({});
+  const xlBusy = useRef(new Set()); // keys with a request in flight
 
   // AI draft + triage (rich-text)
   const [draftHtml, setDraftHtml] = useState("");
@@ -858,6 +947,11 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   // status
   const [status, setStatusState] = useState(ticket.status);
   const [statusSaving, setStatusSaving] = useState(false);
+  // a poll can bring a status changed elsewhere (Zoho, a bulk close): follow
+  // it, unless a change made here is still being saved
+  useEffect(() => {
+    if (!statusSaving) setStatusState(ticket.status);
+  }, [ticket.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const [undoFrom, setUndoFrom] = useState(null);   // status to restore after a quick close
   const undoTimer = useRef(null);
   useEffect(() => () => clearTimeout(undoTimer.current), []);
@@ -895,7 +989,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     for (const f of files) {
       try {
         const up = await api.uploadAttachment(ticket.id, f);
-        setOutFiles((prev) => [...prev, up]);
+        setOutFiles((prev) => [...prev, { ...up, file: f }]); // keep the File: the preview reads it locally
       } catch (err) {
         setSendError(`Could not attach ${f.name}: ${err.message}`);
       }
@@ -1033,9 +1127,12 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     setXDraft(true);
     setSendError(null);
     try {
-      const r = await api.translateDraft(draftHtml, target);
-      setDraftHtml(draftToHtml(r.html));
+      // Same segment translation as the conversation: the editor's own HTML
+      // keeps its exact formatting and the model's text only becomes text.
+      const r = await translateHtmlSegments(draftHtml, target, { skipQuoted: false });
+      setDraftHtml(r.html);
       setDocKey((k) => k + 1);
+      if (r.partial) setSendError("Part of the draft couldn't be translated — check it before sending.");
     } catch (e) {
       setSendError(`Translate failed: ${e.message}`);
     } finally {
@@ -1178,7 +1275,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     if (!files.length) return;
     setNoteUploading(true);
     for (const f of files) {
-      try { const up = await api.uploadAttachment(ticket.id, f); setNoteFiles((prev) => [...prev, up]); }
+      try { const up = await api.uploadAttachment(ticket.id, f); setNoteFiles((prev) => [...prev, { ...up, file: f }]); }
       catch (err) { alert(`Could not attach ${f.name}: ${err.message}`); }
     }
     setNoteUploading(false);
@@ -1303,36 +1400,76 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
     }
   }, [ticket]);
 
-  const translateTo = async (lang) => {
-    if (lang === "orig" || xcache[lang]) {
-      setView(lang);
-      return;
+  // Translate one message's own HTML segment by segment, so it keeps its
+  // format (translateHtml.js). Its module-level cache dedupes requests across
+  // remounts and StrictMode's double effects.
+  const translateMsg = useCallback((m, lang) => {
+    const key = `${m.id}|${lang}`;
+    xlBusy.current.add(key);
+    setXl((s) => ({ ...s, [key]: { pending: true } }));
+    translateMessage(`${ticket.id}:${m.id}`, m.html || plainToHtml(m.text || ""), lang === "es" ? "Spanish" : "English").then(
+      (r) => { xlBusy.current.delete(key); setXl((s) => ({ ...s, [key]: r })); },
+      (e) => { xlBusy.current.delete(key); setXl((s) => ({ ...s, [key]: { error: e.message } })); }
+    );
+  }, [ticket.id]);
+
+  // Only what's on screen is translated: the last few items, or all of them
+  // once "Show earlier" is clicked. Newest first, at most 3 requests at once —
+  // each one that lands re-runs this and starts the next. Messages that show
+  // up after a send/merge/AI draft are picked up the same way.
+  const timeline = useMemo(() => buildTimeline(conversation, notes, showAllMsgs), [conversation, notes, showAllMsgs]);
+  const visibleMsgs = useMemo(
+    () => timeline.items.filter((it) => it.kind === "msg" && (it.m.html || it.m.text)).map((it) => it.m),
+    [timeline]
+  );
+  useEffect(() => {
+    if (view === "orig") return;
+    const todo = visibleMsgs.filter((m) => !xl[`${m.id}|${view}`] && !xlBusy.current.has(`${m.id}|${view}`)).reverse();
+    for (const m of todo.slice(0, Math.max(0, 3 - xlBusy.current.size))) translateMsg(m, view);
+  }, [view, visibleMsgs, xl, translateMsg]);
+  const retryMsg = (m) => setXl((s) => { const n = { ...s }; delete n[`${m.id}|${view}`]; return n; });
+  // every failed or partly translated message on screen, in one click
+  const retryAll = () => setXl((s) => {
+    const n = { ...s };
+    for (const m of visibleMsgs) {
+      const k = `${m.id}|${view}`;
+      if (n[k]?.error || n[k]?.partial) delete n[k];
     }
-    setXlating(true);
-    setXError(null);
-    try {
-      const target = lang === "es" ? "Spanish" : "English";
-      const { translations } = await api.translate(
-        (conversation || []).map((m) => m.text || ""),
-        target
-      );
-      setXcache((c) => ({ ...c, [lang]: translations }));
-      setView(lang);
-    } catch (e) {
-      setXError(e.message);
-    } finally {
-      setXlating(false);
-    }
-  };
+    return n;
+  });
+
+  const translateTo = (lang) => setView(lang);
+  // "Translating… (2 of 4)" → "Translated to Spanish · 1 couldn't be
+  // translated · 1 partly translated", or "Couldn't translate…" when none worked
+  const xlStatus = (() => {
+    if (view === "orig") return { text: "Conversation" };
+    const lang = view === "es" ? "Spanish" : "English";
+    const st = visibleMsgs.map((m) => xl[`${m.id}|${view}`]);
+    const done = st.filter((s) => s && !s.pending).length;
+    const failed = st.filter((s) => s?.error).length;
+    const partial = st.filter((s) => s?.partial).length;
+    if (done < st.length) return { text: `Translating… (${done} of ${st.length})` };
+    if (failed && failed === st.length)
+      return { text: `Couldn't translate to ${lang} (${failed} of ${st.length})`, err: true, retry: true };
+    const notes = [
+      failed && `${failed} message${failed === 1 ? "" : "s"} couldn't be translated`,
+      partial && `${partial} partly translated`,
+    ].filter(Boolean);
+    return { text: [`Translated to ${lang}`, ...notes].join(" · "), err: failed > 0, retry: notes.length > 0 };
+  })();
 
   const changeStatus = async (next) => {
     const prev = status;
     setStatusState(next);
     setStatusSaving(true);
+    onStatusStart?.();
     try {
       await api.setStatus(ticket.id, next);
+      // keeps the chips right without a reload (covers quick close and Undo)
+      onStatusChanged?.(prev, next, ticket);
       return true;
     } catch (e) {
+      onStatusFailed?.();
       setStatusState(prev);
       setSendError(`Could not change status: ${e.message}`);
       return false;
@@ -1544,34 +1681,51 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
             </div>
           )}
 
-          <div className="ticket-cols">
+          {/* the Hide/Show panel button lives in the conversation bar, so with
+              no conversation to show (empty ticket, load error) the panel stays */}
+          <div className={`ticket-cols${sideOpen || conversation?.length === 0 || convoError ? "" : " side-closed"}`}>
           <div className="ticket-main">
           {conversation && conversation.length > 0 && (
             <>
               <div className="convo-bar">
-                <span style={{ fontSize: 12, color: xError ? "#c0392b" : "var(--ink-faint)" }}>
-                  {xlating
-                    ? "Translating…"
-                    : xError
-                    ? `Couldn't translate (${xError})`
-                    : view === "orig"
-                    ? "Conversation"
-                    : `Translated to ${view === "es" ? "Spanish" : "English"}`}
+                <span className="xl-note" style={{ fontSize: 12, marginTop: 0, color: xlStatus.err ? "#c0392b" : "var(--ink-faint)" }}>
+                  {xlStatus.text}
+                  {xlStatus.retry && <> · <button type="button" onClick={retryAll}>Retry</button></>}
                 </span>
                 <div className="seg">
-                  <button className={view === "orig" ? "active" : ""} disabled={xlating} onClick={() => translateTo("orig")}>Original</button>
-                  <button className={view === "en" ? "active" : ""} disabled={xlating} onClick={() => translateTo("en")}>EN</button>
-                  <button className={view === "es" ? "active" : ""} disabled={xlating} onClick={() => translateTo("es")}>ES</button>
+                  <button className={view === "orig" ? "active" : ""} onClick={() => translateTo("orig")}>Original</button>
+                  <button className={view === "en" ? "active" : ""} onClick={() => translateTo("en")}>EN</button>
+                  <button className={view === "es" ? "active" : ""} onClick={() => translateTo("es")}>ES</button>
                 </div>
+                {onToggleSide && (() => {
+                  // count everything the panel holds, so hiding it never hides
+                  // that there is an order or a call to look at
+                  const calls = (phoneHist?.calls?.length || 0) + (phoneHist?.voicemails?.length || 0) + (phoneHist?.sms?.length || 0);
+                  const parts = [
+                    [orders?.length, "Wix order", "Wix orders"],
+                    [wayfairPos?.length, "Wayfair PO", "Wayfair POs"],
+                    [walmartOrders?.length, "Walmart order", "Walmart orders"],
+                    [shipResults?.length, "shipment", "shipments"],
+                    [calls, "call or SMS", "calls & SMS"],
+                  ].filter(([k]) => k > 0);
+                  const n = parts.reduce((s, [k]) => s + k, 0);
+                  return (
+                    <button
+                      className="btn sm"
+                      onClick={onToggleSide}
+                      title={sideOpen
+                        ? "Hide the customer panel so the email gets the full width"
+                        : `Show orders, shipping and phone${parts.length ? ` — ${parts.map(([k, one, many]) => `${k} ${k === 1 ? one : many}`).join(" · ")}` : ""}`}
+                    >
+                      {sideOpen ? "Hide panel" : `Show panel${n ? ` (${n})` : ""}`}
+                    </button>
+                  );
+                })()}
               </div>
               <div className="convo">
                 {(() => {
                   // conversation + internal notes interleaved chronologically
-                  const timeline = [
-                    ...conversation.map((m, i) => ({ kind: "msg", m, i, t: m.createdTime || "" })),
-                    ...notes.map((n) => ({ kind: "note", n, t: n.createdTime || "" })),
-                  ].sort((a, b) => (a.t > b.t ? 1 : -1));
-                  const hidden = !showAllMsgs && timeline.length > 4 ? timeline.length - 4 : 0;
+                  const { hidden, items } = timeline;
                   return (
                     <>
                       {hidden > 0 && (
@@ -1579,7 +1733,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                           ▾ Show {hidden} earlier item{hidden === 1 ? "" : "s"}
                         </button>
                       )}
-                      {timeline.slice(hidden).map((it) => {
+                      {items.map((it) => {
                         if (it.kind === "note") {
                           const n = it.n;
                           const noteText = (n.content || "").replace(/<[^>]+>/g, " ").trim();
@@ -1590,21 +1744,14 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                                 {n.createdTime && <span className="when">{fmtTime(n.createdTime)}</span>}
                               </div>
                               {noteText && <div className="text">{noteText}</div>}
-                              {n.attachments?.length > 0 && (
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                                  {n.attachments.map((a) => {
-                                    const url = api.noteAttachmentUrl(ticket.id, n.id, a.id, a.name);
-                                    return IMAGE_RE.test(a.name || "")
-                                      ? <Thumb key={a.id} url={url} name={a.name} size={a.size} height={64} />
-                                      : <a key={a.id} href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>{a.name}</a>;
-                                  })}
-                                </div>
-                              )}
+                              <NoteAttachments ticketId={ticket.id} commentId={n.id} attachments={n.attachments} />
                             </div>
                           );
                         }
                         const m = it.m;
-                        const txt = view !== "orig" && xcache[view] ? xcache[view][it.i] : m.text;
+                        // translated: the message's own HTML with only its text swapped
+                        const tx = view !== "orig" ? xl[`${m.id}|${view}`] : null;
+                        const body = tx?.html || m.html || (m.text ? plainToHtml(m.text) : "");
                         return (
                           <div key={m.id} className={`msg ${m.direction === "out" ? "out" : "in"}`}>
                             <div className="who">
@@ -1617,14 +1764,25 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                               <AddrLine label="Cc" value={m.cc} />
                             </div>
                             <div className="text">
-                              {view === "orig" && m.html ? (
-                                <EmailHtml html={m.html} />
-                              ) : txt ? (
-                                linkifyNodes(txt)
+                              {body ? (
+                                <EmailHtml html={body} quotedNote={tx?.html ? "original language" : null} />
                               ) : (
                                 "(no text)"
                               )}
                             </div>
+                            {body && view !== "orig" && (!tx || tx.pending) && (
+                              <div className="xl-note"><span className="spin" /> Translating…</div>
+                            )}
+                            {tx?.error && (
+                              <div className="xl-note err" title={tx.error}>
+                                Couldn't translate this message · <button type="button" onClick={() => retryMsg(m)}>Retry</button>
+                              </div>
+                            )}
+                            {tx?.partial && (
+                              <div className="xl-note">
+                                Partly translated · <button type="button" onClick={() => retryMsg(m)}>Retry</button>
+                              </div>
+                            )}
                             <MessageAttachments ticketId={ticket.id} threadId={m.id} attachments={m.attachments} />
                           </div>
                         );
@@ -1690,7 +1848,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                     {noteFiles.map((f) => (
                       <span key={f.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 11 }}>
-                        {f.name}
+                        <OutgoingName files={noteFiles} f={f} />
                         <button type="button" onClick={() => setNoteFiles((prev) => prev.filter((x) => x.id !== f.id))} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, opacity: 0.6 }}>✕</button>
                       </span>
                     ))}
@@ -1923,7 +2081,7 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
                     key={f.id}
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", border: "1px solid var(--line)", borderRadius: 999, background: "#fffef9", fontSize: 12 }}
                   >
-                    {f.name} <span style={{ color: "var(--ink-faint)" }}>{fmtBytes(f.size)}</span>
+                    <OutgoingName files={outFiles} f={f} /> <span style={{ color: "var(--ink-faint)" }}>{fmtBytes(f.size)}</span>
                     {!sent && (
                       <button
                         type="button"
@@ -2037,57 +2195,46 @@ function TicketRow({ ticket, open, onToggle, statusOptions = [], onChanged, sign
   );
 }
 
-// In-app image viewer: click any email/attachment image → enlarges right here
-// over a dark backdrop (click outside, ✕ or Esc to close). One instance lives
-// at the Inbox root; openLightbox() is callable from anywhere in this module.
-let _setLightboxUrl = null;
-const openLightbox = (url) => _setLightboxUrl?.(url);
+// Click any image inside an email → it enlarges in the in-app file viewer
+// (FileViewer.jsx, one instance at the Inbox root). kind:'image' because these
+// URLs carry no file name to tell the kind from.
+const openLightbox = (url) => openViewer({ url, name: "", kind: "image", noDownload: true });
 
-function Lightbox() {
-  const [url, setUrl] = useState(null);
-  useEffect(() => {
-    _setLightboxUrl = setUrl;
-    return () => { _setLightboxUrl = null; };
-  }, []);
-  useEffect(() => {
-    if (!url) return;
-    const onKey = (e) => e.key === "Escape" && setUrl(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [url]);
-  if (!url) return null;
-  return (
-    <div className="lightbox" onClick={() => setUrl(null)}>
-      <img src={url} alt="" onClick={(e) => e.stopPropagation()} />
-      <button className="lightbox-close" title="Close (Esc)" onClick={() => setUrl(null)}>✕</button>
-    </div>
-  );
-}
-
-// Render a message's real (server-sanitized) email HTML, with the quoted
+// Render a message's real email HTML (original or translated), with the quoted
 // reply-chain collapsed behind a toggle so each bubble shows just the new part.
-function EmailHtml({ html }) {
+// Gmail/Zoho quotes and Outlook's "From:/Sent:" chains are tagged by
+// sanitize.js; quotedNote labels them (e.g. "original language").
+function EmailHtml({ html, quotedNote = null }) {
   const [showQuoted, setShowQuoted] = useState(false);
-  const hasQuoted = /<blockquote|gmail_quote|zmail_extra/i.test(html);
-  // click any image in the email → enlarge it in-app
+  // DOMPurify on every render — the server's regex pass alone is bypassable
+  const safe = useMemo(() => sanitizeEmailHtml(html), [html]);
+  const hasQuoted = /class="[^"]*\bsc-quoted\b/.test(safe);
   const onClick = (e) => {
     const t = e.target;
+    // click any image in the email → enlarge it in-app
     if (t?.tagName === "IMG" && t.src) {
       e.preventDefault();
       e.stopPropagation();
       openLightbox(t.src);
+      return;
     }
+    // links open in a new tab — never navigate the app away
+    const a = t?.closest?.("a[href]");
+    const href = a?.getAttribute("href") || "";
+    if (!a || href.startsWith("#") || /^(mailto|tel):/i.test(href)) return;
+    e.preventDefault();
+    window.open(a.href, "_blank", "noopener,noreferrer");
   };
   return (
     <>
       <div
         className={`email-html ${hasQuoted && !showQuoted ? "hide-quotes" : ""}`}
         onClick={onClick}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: safe }}
       />
       {hasQuoted && (
         <button type="button" className="quote-toggle" onClick={() => setShowQuoted((v) => !v)}>
-          {showQuoted ? "▲ Hide quoted text" : "··· Show quoted text"}
+          {showQuoted ? "▲ Hide quoted text" : `··· Show quoted text${quotedNote ? ` (${quotedNote})` : ""}`}
         </button>
       )}
     </>
@@ -2143,36 +2290,63 @@ function SourceBadge({ ticket }) {
   );
 }
 
-const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
-const VIDEO_RE = /\.(mp4|mov|webm|m4v|ogg)$/i;
+// Bubble thumbnails only for formats every <img> shows (HEIC opens in the viewer).
+const IMAGE_RE = /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif)$/i;
 
-// One attachment → image thumb / inline video player / file chip, each with a
-// download button.
-function Attachment({ url, name, size, thumbHeight = 74 }) {
+// Zoho attachments → viewer items. One list per message / note / strip, so
+// ‹ › in the viewer walks the files of the same message.
+const toItems = (attachments, urlOf) =>
+  attachments.map((a) => ({ id: a.id, name: a.name || "file", size: a.size, url: urlOf(a) }));
+
+// Plain click → the in-app viewer. Ctrl/⌘/shift/middle-click keep the
+// browser's new-tab behaviour, which is safe now that the proxy sandboxes
+// every file it serves.
+const viewOnClick = (item, list) => (e) => {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  openViewer(item, list);
+};
+
+// One attachment → image thumb / ▶ video tile / file chip, each with a
+// download button. Videos load nothing until the agent presses play.
+function Attachment({ item, list, thumbHeight = 74 }) {
+  const { url, name, size } = item;
+  const kind = fileKind(name);
   const dl = (
-    <a href={url} download={name} title="Download" style={{ textDecoration: "none", color: "var(--ink-faint)", fontSize: 13, padding: "0 2px" }}>⬇</a>
+    <a href={api.dl(url)} download={name} title="Download" style={{ textDecoration: "none", color: "var(--ink-faint)", fontSize: 13, padding: "0 2px" }}>⬇</a>
   );
-  if (VIDEO_RE.test(name || ""))
+  if (kind === "video")
     return (
-      <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
-        <video controls src={url} style={{ maxWidth: 260, maxHeight: 180, borderRadius: 8, border: "1px solid var(--line)", background: "#000" }} />
-        <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{name} · {fmtBytes(size)} {dl}</span>
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+        <a href={url} onClick={viewOnClick(item, list)} title={`${name} · ${fmtBytes(size)} — click to play`} style={{ ...videoTileStyle, height: thumbHeight }}>
+          <span style={playDotStyle}>▶</span>
+        </a>
+        <span style={{ display: "flex", gap: 4, maxWidth: 220, fontSize: 11, color: "var(--ink-faint)" }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name} · {fmtBytes(size)}</span>
+          {dl}
+        </span>
       </span>
     );
   if (IMAGE_RE.test(name || ""))
     return (
       <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-        <Thumb url={url} name={name} size={size} height={thumbHeight} />
+        <Thumb item={item} list={list} height={thumbHeight} />
         <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{dl} download</span>
       </span>
     );
-  return (
+  const chip = (
     <span style={fileChipStyle}>
-      <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "var(--ink)" }}>{name}</a>
+      <a href={url} onClick={viewOnClick(item, list)} title="Preview" style={{ textDecoration: "none", color: "var(--ink)" }}>
+        {KIND_ICON[kind]} {name}
+      </a>
       <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
       {dl}
     </span>
   );
+  // an iPhone's ATT0000N.htm part can be an iCloud Mail Drop card — say so here
+  if (kind === "html" && /^ATT\d+\.html?$/i.test(name) && (!size || size < 8192))
+    return <>{chip}<MailDropPeek url={url} /></>;
+  return chip;
 }
 
 const fileChipStyle = {
@@ -2180,23 +2354,34 @@ const fileChipStyle = {
   border: "1px solid var(--line)", borderRadius: 8, background: "#fffef9",
   fontSize: 12, textDecoration: "none", color: "var(--ink)",
 };
+const videoTileStyle = {
+  display: "flex", alignItems: "center", justifyContent: "center", width: 128,
+  borderRadius: 8, border: "1px solid var(--line)", textDecoration: "none",
+  background: "linear-gradient(135deg, #4a443a, #1f1d1a)",
+};
+const playDotStyle = {
+  display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34,
+  borderRadius: "50%", background: "rgba(255,255,255,.92)", color: "#1f1d1a",
+  fontSize: 13, paddingLeft: 3, boxShadow: "0 2px 8px rgba(0,0,0,.35)",
+};
 
-// Image thumbnail: lazy-loaded over a soft placeholder, opens the lightbox on
-// click, and degrades to a file chip if the image can't load.
-function Thumb({ url, name, size, height = 74 }) {
+// Image thumbnail: lazy-loaded over a soft placeholder, opens the viewer on
+// click, and degrades to a file chip (still opening the viewer) if it can't load.
+function Thumb({ item, list, height = 74 }) {
+  const { url, name, size } = item;
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   if (failed)
     return (
-      <a href={url} target="_blank" rel="noreferrer" style={fileChipStyle}>
-        {name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
+      <a href={url} onClick={viewOnClick(item, list)} style={fileChipStyle}>
+        {KIND_ICON.image} {name} <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>{fmtBytes(size)}</span>
       </a>
     );
   return (
     <a
       href={url}
       title={`${name} · ${fmtBytes(size)} — click to enlarge`}
-      onClick={(e) => { e.preventDefault(); openLightbox(url); }}
+      onClick={viewOnClick(item, list)}
       style={{ display: "block" }}
     >
       <img
@@ -2219,14 +2404,15 @@ function Thumb({ url, name, size, height = 74 }) {
 // Strip of every file on the ticket: image thumbnails + download links (#7).
 function AttachmentStrip({ ticketId, attachments }) {
   if (!attachments?.length) return null;
+  const items = toItems(attachments, (a) => api.attachmentUrl(ticketId, a.id, a.name));
   return (
     <div style={{ margin: "12px 0 4px" }}>
       <div style={{ fontSize: 12, color: "var(--ink-faint)", marginBottom: 6 }}>
         Attachments ({attachments.length})
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {attachments.map((a) => (
-          <Attachment key={a.id} url={api.attachmentUrl(ticketId, a.id, a.name)} name={a.name} size={a.size} thumbHeight={86} />
+        {items.map((it) => (
+          <Attachment key={it.id} item={it} list={items} thumbHeight={86} />
         ))}
       </div>
     </div>
@@ -2236,12 +2422,48 @@ function AttachmentStrip({ ticketId, attachments }) {
 // Files attached to ONE message — rendered inside its bubble (like Zoho does).
 function MessageAttachments({ ticketId, threadId, attachments }) {
   if (!attachments?.length) return null;
+  const items = toItems(attachments, (a) => api.threadAttachmentUrl(ticketId, threadId, a.id, a.name));
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-      {attachments.map((a) => (
-        <Attachment key={a.id} url={api.threadAttachmentUrl(ticketId, threadId, a.id, a.name)} name={a.name} size={a.size} />
+      {items.map((it) => (
+        <Attachment key={it.id} item={it} list={items} />
       ))}
     </div>
+  );
+}
+
+// Files on an internal note — same thumbs / chips / viewer as a message's.
+function NoteAttachments({ ticketId, commentId, attachments }) {
+  if (!attachments?.length) return null;
+  const items = toItems(attachments, (a) => api.noteAttachmentUrl(ticketId, commentId, a.id, a.name));
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+      {items.map((it) => (
+        <Attachment key={it.id} item={it} list={items} thumbHeight={64} />
+      ))}
+    </div>
+  );
+}
+
+// Name of a file the agent is about to send (reply or note). Clicking it
+// previews the local File — Zoho's /uploads have no GET, and no round-trip
+// is needed. FileViewer decides the kind itself, never from File.type.
+function OutgoingName({ files, f }) {
+  if (!f.file) return f.name;
+  const open = () => {
+    const local = files.filter((x) => x.file);
+    const items = local.map((x) => ({ name: x.name, size: x.size || x.file.size, file: x.file }));
+    openViewer(items[local.indexOf(f)], items);
+  };
+  return (
+    <button
+      type="button"
+      title="Preview"
+      onClick={open}
+      style={{ border: "none", background: "none", padding: 0, cursor: "pointer", color: "inherit", font: "inherit", textDecoration: "underline dotted" }}
+    >
+      {KIND_ICON[fileKind(f.name)]} {f.name}
+    </button>
   );
 }
 
@@ -2625,17 +2847,4 @@ function ProductLookup({ q, setQ, results, loading, onSearch }) {
       )}
     </div>
   );
-}
-
-// render plain text with clickable links (for the read-only conversation)
-function linkifyNodes(text) {
-  return String(text || "")
-    .split(/(https?:\/\/[^\s)]+)/g)
-    .map((p, i) =>
-      /^https?:\/\//.test(p) ? (
-        <a key={i} href={p} target="_blank" rel="noreferrer">{p}</a>
-      ) : (
-        p
-      )
-    );
 }

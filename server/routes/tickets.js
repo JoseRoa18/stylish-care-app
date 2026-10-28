@@ -10,12 +10,12 @@ import {
   moveTicketToTrash,
   listTicketComments,
   addTicketComment,
-  downloadCommentAttachment,
+  openCommentAttachment,
   listTicketAttachments,
-  downloadTicketAttachment,
-  downloadThreadAttachment,
+  openTicketAttachment,
+  openThreadAttachment,
   uploadTicketAttachment,
-  fetchInlineImage,
+  openInlineImage,
   fetchConversationImages,
   mergeTickets,
   getTicketPhone,
@@ -36,6 +36,7 @@ import { touchStatus, touchTicket, removeTicketRow, relatedTickets } from "../ti
 import { recordFeedback } from "../feedback.js";
 import { sendSurvey } from "../surveys.js";
 import { supabase } from "../supabase.js";
+import { sendZohoFile, sendFileError, fileOptions, rasterImageType } from "../attachment-http.js";
 
 const router = Router();
 
@@ -180,16 +181,13 @@ router.post("/:id/notes", async (req, res) => {
 });
 
 // GET …/comments/:commentId/attachments/:attId/download — note image/file.
+// Streamed with safe headers (see server/attachment-http.js); ?dl=1 downloads.
 router.get("/:id/comments/:commentId/attachments/:attId/download", async (req, res) => {
   try {
-    const { buffer, contentType } = await downloadCommentAttachment(req.params.id, req.params.commentId, req.params.attId);
-    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.send(buffer);
+    const { id, commentId, attId } = req.params;
+    await sendZohoFile(req, res, (signal) => openCommentAttachment(id, commentId, attId, { signal }), fileOptions(req));
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendFileError(res, err);
   }
 });
 
@@ -235,15 +233,19 @@ router.post("/:id/send", async (req, res) => {
 
 // GET /api/tickets/inline-image?src=… — proxy a Zoho inline email image (their
 // signed relative URLs only resolve inside Zoho's UI). Declared before the
-// /:id routes; the src path is strictly validated in fetchInlineImage.
+// /:id routes; the src path is strictly validated in openInlineImage.
+// Only raster image types pass (415 otherwise): email links can point here, so
+// it must never answer with something a browser would run as a page.
 router.get("/inline-image", async (req, res) => {
   try {
-    const { buffer, contentType } = await fetchInlineImage(String(req.query.src || ""));
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "private, max-age=86400");
-    res.send(buffer);
+    const src = String(req.query.src || "");
+    await sendZohoFile(req, res, (signal) => openInlineImage(src, { signal }), {
+      name: "image",
+      type: (zres) => rasterImageType(zres.headers.get("content-type")),
+      maxAge: 86400,
+    });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendFileError(res, err);
   }
 });
 
@@ -260,14 +262,10 @@ router.get("/:id/attachments", async (req, res) => {
 // browser can open/preview it (Zoho's own URLs require the OAuth header).
 router.get("/:id/attachments/:attId/download", async (req, res) => {
   try {
-    const { buffer, contentType } = await downloadTicketAttachment(req.params.id, req.params.attId);
-    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.send(buffer);
+    const { id, attId } = req.params;
+    await sendZohoFile(req, res, (signal) => openTicketAttachment(id, attId, { signal }), fileOptions(req));
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendFileError(res, err);
   }
 });
 
@@ -275,16 +273,10 @@ router.get("/:id/attachments/:attId/download", async (req, res) => {
 // belongs to ONE message (different Zoho namespace than ticket attachments).
 router.get("/:id/threads/:threadId/attachments/:attId/download", async (req, res) => {
   try {
-    const { buffer, contentType } = await downloadThreadAttachment(
-      req.params.id, req.params.threadId, req.params.attId
-    );
-    const name = String(req.query.name || "attachment").replace(/[^\w.\- ()]/g, "_");
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `inline; filename="${name}"`);
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.send(buffer);
+    const { id, threadId, attId } = req.params;
+    await sendZohoFile(req, res, (signal) => openThreadAttachment(id, threadId, attId, { signal }), fileOptions(req));
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    sendFileError(res, err);
   }
 });
 

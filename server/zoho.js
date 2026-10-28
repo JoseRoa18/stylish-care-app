@@ -354,7 +354,14 @@ function stripQuoted(text) {
   if (!text) return "";
   let t = text.replace(/\r\n/g, "\n");
   const markers = [
-    /On .{1,200}? wrote:/is, // Gmail: "On <date>, <name> wrote:"
+    // Gmail/Apple/Outlook mobile: "On Mon, Aug 24, 2026 at 12:54 PM, Name <a@b> wrote:".
+    // Case-sensitive, must start a word and contain a time — the old
+    // /On .+? wrote:/i also matched "on" inside words and cut mid-word
+    // ("a question about the sink, my son wrote: …" became "a questi").
+    /(?<!\p{L})On\s(?:(?!wrote:)[\s\S]){0,200}?\d{1,2}:\d{2}(?:(?!wrote:)[\s\S]){0,200}?\swrote:/u,
+    // French Gmail: "Le lun. 24 août 2026 à 12:54, Name <a@b> a écrit :"
+    // (fr-CA writes the time "16 h 30")
+    /(?<!\p{L})Le\s(?:(?!a\s+écrit)[\s\S]){0,200}?\d{1,2}(?::|\s?h\s?)\d{2}(?:(?!a\s+écrit)[\s\S]){0,200}?\sa\s+écrit\s*:/u,
     /-{2,}\s*Original Message\s*-{2,}/i, // Outlook
     /\nFrom:.+\nSent:.+/is, // Outlook header block
     /\n_{5,}\n/, // long underscore separators
@@ -396,7 +403,7 @@ function sanitizeEmailHtml(html) {
 }
 
 // Read a ticket's recent conversation. Each message carries BOTH:
-//  • text — quoted-chain-stripped plain text (what the AI and translator use)
+//  • text — quoted-chain-stripped plain text (what the AI drafter uses)
 //  • html — the sanitized original email HTML (what the inbox renders, so
 //    formatting/tables/links survive instead of a mangled wall of text)
 //  • attachments — name/size/id of files on that message
@@ -517,18 +524,30 @@ export async function addTicketComment(ticketId, content, attachmentIds) {
   });
 }
 
-// Binary content of a file attached to a private note (comment).
-export async function downloadCommentAttachment(ticketId, commentId, attId) {
+// ── file downloads ───────────────────────────────────────────
+// Authorized GET of a Zoho file endpoint, returned as the raw fetch Response
+// so the routes can STREAM it to the browser (server/attachment-http.js) —
+// buffering it would hit Vercel's 4.5 MB response cap on most videos. The
+// signal lets the route cancel the download when the browser goes away.
+async function openZohoFile(path, { signal, what = "attachment" } = {}) {
   const token = await getAccessToken();
-  const res = await fetch(
-    `${ZOHO_API_BASE}/tickets/${ticketId}/comments/${commentId}/attachments/${attId}/content`,
-    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
-  );
-  if (!res.ok) throw new Error(`Zoho comment attachment download failed (${res.status})`);
-  return {
-    buffer: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get("content-type") || "application/octet-stream",
-  };
+  const res = await fetch(`${ZOHO_API_BASE}${path}`, {
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID },
+    signal,
+  });
+  if (!res.ok) {
+    res.body?.cancel().catch(() => {});
+    throw new Error(`Zoho ${what} download failed (${res.status})`);
+  }
+  return res;
+}
+
+// File attached to a private note (comment).
+export function openCommentAttachment(ticketId, commentId, attId, opts = {}) {
+  return openZohoFile(`/tickets/${ticketId}/comments/${commentId}/attachments/${attId}/content`, {
+    ...opts,
+    what: "comment attachment",
+  });
 }
 
 // ── ticket attachments (view + upload) ───────────────────────
@@ -544,30 +563,24 @@ export async function listTicketAttachments(ticketId) {
   }));
 }
 
-// Binary content of one attachment (the app proxies this to the browser —
-// Zoho's own links need the OAuth header, which a browser can't send).
-export async function downloadTicketAttachment(ticketId, attachmentId) {
-  const token = await getAccessToken();
-  const res = await fetch(
-    `${ZOHO_API_BASE}/tickets/${ticketId}/attachments/${attachmentId}/content`,
-    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
-  );
-  if (!res.ok) throw new Error(`Zoho attachment download failed (${res.status})`);
-  return {
-    buffer: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get("content-type") || "application/octet-stream",
-  };
+// One ticket-level attachment (the app proxies this to the browser — Zoho's
+// own links need the OAuth header, which a browser can't send).
+export function openTicketAttachment(ticketId, attachmentId, opts = {}) {
+  return openZohoFile(`/tickets/${ticketId}/attachments/${attachmentId}/content`, opts);
 }
 
-// Binary content of an attachment that belongs to ONE message (thread) — these
-// live in a different namespace than ticket-level attachments.
+// An attachment that belongs to ONE message (thread) — these live in a
+// different namespace than ticket-level attachments.
+export function openThreadAttachment(ticketId, threadId, attachmentId, opts = {}) {
+  return openZohoFile(`/tickets/${ticketId}/threads/${threadId}/attachments/${attachmentId}/content`, {
+    ...opts,
+    what: "thread attachment",
+  });
+}
+
+// Buffered variant, for the AI draft's photos (they go out as base64).
 export async function downloadThreadAttachment(ticketId, threadId, attachmentId) {
-  const token = await getAccessToken();
-  const res = await fetch(
-    `${ZOHO_API_BASE}/tickets/${ticketId}/threads/${threadId}/attachments/${attachmentId}/content`,
-    { headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID } }
-  );
-  if (!res.ok) throw new Error(`Zoho thread attachment download failed (${res.status})`);
+  const res = await openThreadAttachment(ticketId, threadId, attachmentId);
   return {
     buffer: Buffer.from(await res.arrayBuffer()),
     contentType: res.headers.get("content-type") || "application/octet-stream",
@@ -632,20 +645,11 @@ export async function uploadTicketAttachment(ticketId, { buffer, filename, mime 
 
 // Inline image from an email body (signed Zoho path, needs our OAuth header).
 // The path is validated strictly so this can only proxy Zoho inline images.
-export async function fetchInlineImage(srcPath) {
+export async function openInlineImage(srcPath, opts = {}) {
   if (!/^\/supportapi\/api\/v1\/threads\/\d+\/inlineImages\/[A-Za-z0-9]+(\?[^\s]*)?$/.test(srcPath)) {
-    throw new Error("Invalid inline image path");
+    throw Object.assign(new Error("Invalid inline image path"), { status: 400 });
   }
-  const token = await getAccessToken();
-  const url = `${ZOHO_API_BASE}${srcPath.replace("/supportapi/api/v1", "")}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Zoho-oauthtoken ${token}`, orgId: ZOHO_ORG_ID },
-  });
-  if (!res.ok) throw new Error(`Zoho inline image fetch failed (${res.status})`);
-  return {
-    buffer: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get("content-type") || "image/png",
-  };
+  return openZohoFile(srcPath.replace("/supportapi/api/v1", ""), { ...opts, what: "inline image" });
 }
 
 // ── merge tickets ────────────────────────────────────────────

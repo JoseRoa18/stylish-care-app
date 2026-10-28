@@ -156,16 +156,24 @@ export default function Dashboard({ onOpenInbox }) {
 
       {/* ── headline metrics ─────────────────────────────── */}
       <div className="grid cards-4" style={{ marginTop: 8 }}>
+        {/* Zoho's own number (Open Cases), same as the Inbox "Open" chip and
+            not tied to the period. Automated mail stays in it, because Zoho
+            counts it too; the sub-line says how much of it there is. */}
         <Metric
           label="Open tickets"
-          value={data.openNow ?? data.active}
-          sub={`incl. escalated · ${data.active} active total · ${data.closed} closed`}
+          value={data.openNow}
+          sub={
+            "Open + Escalated" +
+            (data.openAutomated ? ` · incl. ${data.openAutomated} automated` : "") +
+            (data.openBestBuy ? ` · incl. ${data.openBestBuy} Best Buy` : "") +
+            (data.onHold != null ? ` · ${data.onHold} on hold` : "")
+          }
         />
         <Metric
           label="Avg wait (open)"
           value={fmtDuration(data.avgWaitMs)}
           color={targetColor(data.avgWaitMs, data.targets?.waitHours) || waitColor(data.avgWaitMs)}
-          sub={`open + escalated · oldest ${fmtDuration(data.oldestWaitMs)}${data.targets?.waitHours ? ` · target ${data.targets.waitHours}h` : ""}`}
+          sub={`${data.includeNotifications ? "all open tickets" : "customer tickets · excl. automated"} · oldest ${fmtDuration(data.oldestWaitMs)}${data.targets?.waitHours ? ` · target ${data.targets.waitHours}h` : ""}`}
         />
         <AvgResolutionCard
           defaultAvgMs={data.avgResolutionMs}
@@ -176,9 +184,11 @@ export default function Dashboard({ onOpenInbox }) {
       </div>
 
       {/* ── breakdown charts ─────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+      <div className="grid-2" style={{ gap: 16, marginTop: 16 }}>
         <div className="card">
-          <div className="chart-title">Tickets by status</div>
+          {/* counts tickets CREATED in the period (automated excluded), so its
+              Open bar is not the open count — the title says which it is */}
+          <div className="chart-title">Tickets created in this period · by current status</div>
           <BarChart data={data.byStatus} colors={STATUS_COLORS} onPick={onOpenInbox} />
         </div>
         <div className="card">
@@ -199,7 +209,7 @@ export default function Dashboard({ onOpenInbox }) {
 
       {/* ── RingCentral: calls + combined volume ─────────── */}
       {data.callsPerDay?.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+        <div className="grid-2" style={{ gap: 16, marginTop: 16 }}>
           <div className="card">
             <div className="chart-title">Answered calls · last 7 days</div>
             <ColumnChart data={data.callsPerDay} color="#7a8b6f" />
@@ -265,7 +275,8 @@ export default function Dashboard({ onOpenInbox }) {
             </span>
           ))}
         </div>
-        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>Last synced: {lastFetch}</span>
+        {/* the time of this request, not of the last Zoho sync */}
+        <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>Updated: {lastFetch}</span>
         <button className="btn sm" onClick={onOpenInbox}>Go to Inbox →</button>
       </div>
     </>
@@ -484,7 +495,7 @@ function ModelReports({ reports }) {
   };
   const total = (rows) => rows.reduce((n, r) => n + r.count, 0);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+    <div className="grid-2" style={{ gap: 16, marginTop: 16 }}>
       <div className="card">
         <div className="chart-title">Spare parts & warranty · by model</div>
         {list(reports.parts)}
@@ -699,7 +710,7 @@ function CategoryPanel({ byCategory, awaiting, labels }) {
   const named = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [name(k), v]));
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+    <div className="grid-2" style={{ gap: 16, marginTop: 16 }}>
       <div className="card">
         <div className="chart-title">Tickets by issue</div>
         <BarChart data={named(issues)} />
@@ -709,7 +720,7 @@ function CategoryPanel({ byCategory, awaiting, labels }) {
         </div>
       </div>
       <div className="card">
-        <div className="chart-title">Awaiting Response · by issue</div>
+        <div className="chart-title">Awaiting Response, created in this period · by issue</div>
         {Object.keys(waiting).length ? (
           <BarChart data={named(waiting)} />
         ) : (
