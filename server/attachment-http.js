@@ -5,9 +5,10 @@
 //     .htm; vnd.ms-excel for .xlsx), so the type comes from the file extension.
 //  2) A customer's file must never run as a page on the app's origin: it would
 //     carry the agent's session cookie. nosniff on everything, plus a CSP
-//     sandbox on everything except PDF (Chrome refuses to show a sandboxed PDF;
-//     application/pdf + nosniff can't execute as HTML anyway), keep every type
-//     inert even when it is opened in a new tab.
+//     sandbox on everything except PDF, video and audio (Chrome refuses to show
+//     a sandboxed PDF and never plays sandboxed media; those types + nosniff
+//     can't execute as HTML anyway, and media gets default-src 'none'), keep
+//     every type inert even when it is opened in a new tab.
 //     Security must not depend on ?name= (it is the customer's filename): every
 //     branch below is non-executable whatever the name says. Keep it that way.
 //  3) Vercel caps a buffered function response at 4.5 MB, so the Zoho body is
@@ -70,12 +71,16 @@ export function rasterImageType(contentType) {
   return /^image\/(png|jpe?g|gif|webp|bmp)$/.test(t) ? t : null;
 }
 
-// Raster images, video and audio can't run anything themselves; the bare
-// sandbox keeps them viewable when opened in a tab. Everything else (html,
-// svg, text, eml, unknown) also gets default-src 'none' so an opened page
-// can't load scripts, frames or forms either.
-const MEDIA_RE = /^(image\/(png|jpeg|gif|webp|bmp|heic|heif)|video\/|audio\/)/;
+// Raster images can't run anything themselves; the bare sandbox keeps them
+// viewable when opened in a tab. Video and audio can't run anything either,
+// but the browser's media page never starts playing inside a sandbox, so they
+// may only load media from here instead. Everything else (html, svg, text,
+// eml, unknown) also gets default-src 'none' so an opened page can't load
+// scripts, frames or forms either.
+const IMAGE_RE = /^image\/(png|jpeg|gif|webp|bmp|heic|heif)$/;
+const AV_RE = /^(video|audio)\//;
 const SANDBOX = "sandbox allow-popups allow-popups-to-escape-sandbox";
+const AV_ONLY = "default-src 'none'; media-src 'self'";
 const LOCKED =
   `${SANDBOX}; default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; ` +
   "font-src data: https:; form-action 'none'; base-uri 'none'";
@@ -90,7 +95,8 @@ function contentDisposition(name, download) {
 export function setAttachmentHeaders(res, { name, type, download = false, maxAge = 3600 }) {
   res.setHeader("Content-Type", type);
   res.setHeader("X-Content-Type-Options", "nosniff");
-  if (type !== "application/pdf") res.setHeader("Content-Security-Policy", MEDIA_RE.test(type) ? SANDBOX : LOCKED);
+  if (type !== "application/pdf")
+    res.setHeader("Content-Security-Policy", IMAGE_RE.test(type) ? SANDBOX : AV_RE.test(type) ? AV_ONLY : LOCKED);
   res.setHeader("Content-Disposition", contentDisposition(name, download || type === "application/octet-stream"));
   res.setHeader("Cache-Control", `private, max-age=${maxAge}`);
 }

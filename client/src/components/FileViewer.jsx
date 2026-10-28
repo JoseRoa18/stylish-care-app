@@ -614,41 +614,240 @@ function PdfView({ item, blob }) {
 function MediaView({ item, blob, type, kind }) {
   const url = useObjectUrl(blob, type || DEFAULT_TYPE[kind]);
   const [failed, setFailed] = useState(false);
-  const [noPicture, setNoPicture] = useState(false);
+  if (kind === "video") return url ? <VideoView item={item} blob={blob} url={url} /> : <Loading />;
   if (failed)
     return (
       <FileCard
         item={item}
         kind={kind}
         blob={blob}
-        title={`Can't play this ${kind} here`}
-        text="This browser can't decode it — iPhone videos (HEVC .MOV) often don't play on Windows. Download it and open it with a video player."
+        title="Can't play this audio here"
+        text="This browser can't play this audio file. Download it and open it with a media player."
       />
     );
   if (!url) return <Loading />;
-  if (kind === "audio")
+  return (
+    <div className="viewer-card" style={{ maxWidth: 520, width: "92vw" }}>
+      <div style={{ fontSize: 36 }}>🎵</div>
+      <audio src={url} controls autoPlay style={{ width: "100%", marginTop: 10 }} onError={() => setFailed(true)} />
+    </div>
+  );
+}
+
+// Edge's "Enhance videos" setting paints a picture turned 90° / 270° solid
+// black on some GPUs, and almost every phone video is turned that way. Sound,
+// decoding and canvas readback stay fine, so nothing on the page can see it:
+// in Edge those videos are drawn on a canvas from a hidden <video> instead
+// ("compatible view"), and the agent can switch either way.
+const EDGE = /\bEdg\//.test(navigator.userAgent);
+
+// 90 / 270 when the file asks for its picture to be turned: the frame says so
+// (WebCodecs), else the decoded size is the shown size swapped.
+function rotationOf(v, meta) {
+  try {
+    const f = new VideoFrame(v);
+    const r = f.rotation || 0;
+    f.close();
+    if (r) return r;
+  } catch { /* no WebCodecs, or no frame yet */ }
+  return meta && meta.width === v.videoHeight && meta.height === v.videoWidth && meta.width !== meta.height ? 90 : 0;
+}
+
+const clock = (s) => {
+  if (!Number.isFinite(s)) return "–:––";
+  const n = Math.max(0, Math.floor(s));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
+};
+
+function VideoView({ item, blob, url }) {
+  const vRef = useRef(null);
+  const cRef = useRef(null);
+  const wrapRef = useRef(null);
+  const [error, setError] = useState(null); // "damaged" | "codec"
+  const [noPicture, setNoPicture] = useState(false);
+  const [rot, setRot] = useState(null); // null until the first frame
+  const [pick, setPick] = useState(null); // "canvas" | "native" once the agent chose
+  const [pl, setPl] = useState({ paused: true, t: 0, dur: NaN, muted: false });
+  // !error: the error card replaces the player, so the drawing loop must stop
+  const compat = EDGE && !error && !noPicture && (pick ? pick === "canvas" : rot % 180 === 90);
+
+  const sync = () => {
+    const v = vRef.current;
+    if (v) setPl({ paused: v.paused, t: v.currentTime, dur: v.duration, muted: v.muted });
+  };
+  const detect = (meta) => {
+    const r = rotationOf(vRef.current, meta);
+    setRot((x) => x || r);
+  };
+
+  // the rotation shows on the first frame (loadeddata covers a missing rVFC)
+  useEffect(() => {
+    const v = vRef.current;
+    if (!EDGE || !v.requestVideoFrameCallback) return;
+    const id = v.requestVideoFrameCallback((now, meta) => detect(meta));
+    return () => v.cancelVideoFrameCallback(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Compatible view: the same <video> keeps playing (sound, position), hidden;
+  // every frame it shows is copied onto the canvas, which applies the rotation.
+  useEffect(() => {
+    if (!compat) return;
+    const v = vRef.current;
+    const c = cRef.current;
+    const g = c.getContext("2d");
+    let rv = 0, raf = 0, last = 0;
+    const draw = () => {
+      if (!v.videoWidth) return;
+      if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+        c.width = v.videoWidth;
+        c.height = v.videoHeight;
+      }
+      g.drawImage(v, 0, 0, c.width, c.height);
+    };
+    const onFrame = () => {
+      last = performance.now();
+      draw();
+      rv = v.requestVideoFrameCallback(onFrame);
+    };
+    // rAF only steps in if frame callbacks stop (or don't exist), and runs
+    // only while playing: paused or ended, nothing new needs drawing
+    const tick = (now) => {
+      if (now - last > 250) draw();
+      raf = v.paused ? 0 : requestAnimationFrame(tick);
+    };
+    const onPlay = () => {
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    if (v.requestVideoFrameCallback) rv = v.requestVideoFrameCallback(onFrame);
+    if (!v.paused) onPlay();
+    draw();
+    v.addEventListener("play", onPlay);
+    v.addEventListener("seeked", draw);
+    v.addEventListener("loadeddata", draw);
+    return () => {
+      v.cancelVideoFrameCallback?.(rv);
+      cancelAnimationFrame(raf);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("seeked", draw);
+      v.removeEventListener("loadeddata", draw);
+    };
+  }, [compat]);
+
+  // Space plays / pauses the player the agent is looking at: the compatible
+  // view's frame once it opens (focus was on ✕, where Space closes the viewer),
+  // the browser's own player once the agent picks it (focus was left on the
+  // note's button, where Space switched the player back)
+  useEffect(() => {
+    if (compat) wrapRef.current?.focus({ preventScroll: true });
+    else if (pick === "native") vRef.current?.focus({ preventScroll: true });
+  }, [compat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (error)
     return (
-      <div className="viewer-card" style={{ maxWidth: 520, width: "92vw" }}>
-        <div style={{ fontSize: 36 }}>🎵</div>
-        <audio src={url} controls autoPlay style={{ width: "100%", marginTop: 10 }} onError={() => setFailed(true)} />
-      </div>
+      <FileCard
+        item={item}
+        kind="video"
+        blob={blob}
+        title="Can't play this video"
+        text={
+          error === "damaged"
+            ? "The file looks incomplete or damaged. Download it to try another player."
+            : "This browser can't play this video file. Download it and open it with a video player such as VLC."
+        }
+      />
     );
+
+  const toggle = () => {
+    const v = vRef.current;
+    if (v.paused) v.play().catch(() => {});
+    else v.pause();
+  };
+  const seek = (t) => {
+    vRef.current.currentTime = t;
+    setPl((p) => ({ ...p, t }));
+  };
+  const fullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else wrapRef.current?.requestFullscreen?.().catch(() => {});
+  };
+  // Space plays / pauses anywhere on the player (also on its buttons, as on
+  // the native one); ← → step 5 s on the seek bar and walk the files elsewhere.
+  const onKey = (e) => {
+    if (e.key !== " ") return;
+    e.preventDefault();
+    toggle();
+  };
+  const onSeekKey = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const v = vRef.current;
+    seek(Math.min(v.duration || 0, Math.max(0, v.currentTime + (e.key === "ArrowLeft" ? -5 : 5))));
+  };
+  const note = EDGE && !noPicture && (pick || rot !== null);
   return (
     <>
       {noPicture && (
         <div className="viewer-note" style={{ borderRadius: 8, marginBottom: 8 }}>
-          No picture? The video codec (often HEVC from iPhones) may not be supported here — download it to watch it.
+          Only the sound can play here: this browser can't decode the picture. Download the video to watch it.
         </div>
       )}
-      <video
-        className="viewer-media"
-        src={url}
-        controls
-        autoPlay
-        playsInline
-        onError={() => setFailed(true)}
-        onLoadedMetadata={(e) => setNoPicture(e.currentTarget.videoWidth === 0)}
-      />
+      <div
+        ref={wrapRef}
+        className={`viewer-player${compat ? " compat" : ""}${note ? " noted" : ""}`}
+        tabIndex={compat ? 0 : undefined}
+        onKeyDown={compat ? onKey : undefined}
+      >
+        <video
+          ref={vRef}
+          className={compat ? "viewer-vsrc" : "viewer-media"}
+          src={url}
+          controls={!compat}
+          autoPlay
+          playsInline
+          // the container can't be read at all (cut-off upload, no moov box);
+          // NO_SUPPORTED_STREAMS is an intact file in a codec the browser lacks
+          onError={(e) => setError(/DEMUXER_ERROR_COULD_NOT_(OPEN|PARSE)/.test(e.currentTarget.error?.message || "") ? "damaged" : "codec")}
+          onLoadedMetadata={(e) => { setNoPicture(e.currentTarget.videoWidth === 0); sync(); }}
+          onLoadedData={EDGE ? () => detect(null) : undefined}
+          onPlay={sync}
+          onPause={sync}
+          onTimeUpdate={sync}
+          onDurationChange={sync}
+          onVolumeChange={sync}
+        />
+        {compat && <canvas ref={cRef} className="viewer-media" onClick={toggle} />}
+        {compat && (
+          <div className="viewer-vctl">
+            <button type="button" title={pl.paused ? "Play (Space)" : "Pause (Space)"} onClick={toggle}>
+              {pl.paused ? "▶" : "❚❚"}
+            </button>
+            <input
+              type="range"
+              aria-label="Position"
+              min={0}
+              max={Number.isFinite(pl.dur) ? pl.dur : 0}
+              step="any"
+              value={pl.t}
+              onChange={(e) => seek(Number(e.target.value))}
+              onKeyDown={onSeekKey}
+            />
+            <span className="viewer-vtime">{clock(pl.t)} / {clock(pl.dur)}</span>
+            <button type="button" title={pl.muted ? "Unmute" : "Mute"} onClick={() => { vRef.current.muted = !vRef.current.muted; }}>
+              {pl.muted ? "🔇" : "🔊"}
+            </button>
+            <button type="button" title="Full screen" onClick={fullscreen}>⛶</button>
+          </div>
+        )}
+      </div>
+      {note && (
+        <div className="viewer-vnote">
+          {compat ? (
+            <>Compatible view for Edge · <button type="button" onClick={() => setPick("native")}>Use the browser's player</button></>
+          ) : (
+            <>Black picture? <button type="button" onClick={() => setPick("canvas")}>Show it another way</button> · or turn off 'Enhance videos' in Edge settings</>
+          )}
+        </div>
+      )}
     </>
   );
 }
